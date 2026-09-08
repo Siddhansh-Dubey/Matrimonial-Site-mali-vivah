@@ -42,8 +42,8 @@ export default function HomePage() {
         )}
 
         <div className="mt-10 flex flex-wrap justify-center gap-3">
-          <Link href="/register" className="btn-primary">{t('nav.register')}</Link>
-          <Link href="/search" className="btn-secondary">{t('nav.search')}</Link>
+          <Link href="/login" className="btn-primary">{t('nav.login')}</Link>
+          <Link href="/register" className="btn-secondary">{t('nav.register')}</Link>
         </div>
       </div>
     </div>
