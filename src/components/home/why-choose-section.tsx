@@ -135,10 +135,11 @@ export function WhyChooseSection() {
 
           {/* trust emblem */}
           <div className="order-1 flex justify-center lg:order-2">
-            <div className="relative">
-              <span aria-hidden className="absolute -inset-2 rounded-full border border-dashed border-gold-400/50" />
-              <span aria-hidden className="absolute -inset-4 hidden rounded-full border border-gold-300/40 sm:block" />
-              <div className="relative flex h-64 w-64 flex-col items-center justify-center rounded-full bg-white text-center shadow-card-float ring-1 ring-brand-100 sm:h-72 sm:w-72">
+            <div className="relative h-64 w-64 sm:h-72 sm:w-72">
+              <span aria-hidden className="absolute inset-0 rounded-full border border-gold-400/40" />
+              <span aria-hidden className="absolute -inset-2.5 rounded-full border border-dashed border-gold-400/50" />
+              <span aria-hidden className="absolute -inset-5 hidden rounded-full border border-gold-300/40 sm:block" />
+              <div className="absolute inset-0 flex flex-col items-center justify-center rounded-full text-center">
                 <p className="text-[11px] font-bold uppercase tracking-[0.34em] text-gold-600">
                   {t('home.whyChoose.badge.kicker')}
                 </p>
@@ -157,13 +158,25 @@ export function WhyChooseSection() {
           </div>
 
           {/* right column */}
-          <ul className="order-3 grid gap-5 sm:grid-cols-2 lg:mt-20 lg:grid-cols-1">
+          <ul className="order-3 grid gap-5 sm:grid-cols-2 lg:mt-16 lg:grid-cols-1">
             {RIGHT_FEATURES.map((feature) => (
               <li key={feature.titleKey}>
                 <FeatureCard feature={feature} />
               </li>
             ))}
           </ul>
+        </div>
+
+        {/* closing tagline */}
+        <div className="mt-16 flex flex-col items-center gap-5 text-center sm:mt-20">
+          <span aria-hidden className="flex items-center gap-3">
+            <span className="h-px w-10 bg-gold-500/60 sm:w-16" />
+            <Heart className="h-3.5 w-3.5 fill-gold-500 text-gold-500" />
+            <span className="h-px w-10 bg-gold-500/60 sm:w-16" />
+          </span>
+          <p className="text-xs font-semibold uppercase tracking-[0.3em] text-gold-600/80 sm:text-sm">
+            {t('brand.tagline')}
+          </p>
         </div>
       </div>
     </section>
