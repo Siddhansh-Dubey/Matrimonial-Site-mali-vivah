@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { BadgeCheck, ChevronDown, Heart, HeartHandshake, Lock, ShieldCheck, UserCheck, Users } from 'lucide-react'
 import { useI18n } from '@/lib/i18n/provider'
+import { HeroSection } from '@/components/home/hero-section'
 
 export default function HomePage() {
   const { t } = useI18n()
@@ -36,37 +37,10 @@ export default function HomePage() {
 
   return (
     <>
-      {/* Hero */}
-      <section className="relative overflow-hidden">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(201,44,75,0.08),_transparent_46%),radial-gradient(circle_at_bottom_right,_rgba(212,160,50,0.10),_transparent_40%)]"
-        />
-        <div className="container-page relative mx-auto max-w-3xl py-20 text-center sm:py-28">
-          <span className="inline-flex items-center gap-2 rounded-full bg-brand-50 px-3.5 py-1.5 text-xs font-semibold uppercase tracking-wide text-brand-700">
-            <Heart className="h-3.5 w-3.5 fill-current" aria-hidden />
-            {t('site.tagline')}
-          </span>
-          <h1 className="mt-6 font-display text-4xl font-bold leading-tight text-stone-900 sm:text-5xl">
-            {t('home.hero.title')}
-          </h1>
-          <p className="mx-auto mt-5 max-w-2xl text-base leading-relaxed text-stone-600 sm:text-lg">
-            {t('home.hero.body')}
-          </p>
-          <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Link href="/register" className="btn-primary w-full sm:w-auto">
-              {t('home.hero.ctaPrimary')}
-            </Link>
-            <a href="#how-it-works" className="btn-secondary w-full sm:w-auto">
-              {t('home.hero.ctaSecondary')}
-            </a>
-          </div>
-          <p className="mt-6 text-xs text-stone-500 sm:text-sm">{t('home.hero.note')}</p>
-        </div>
-      </section>
+      <HeroSection />
 
       {/* Trust bar */}
-      <section className="border-y border-stone-200 bg-white">
+      <section className="border-b border-stone-200 bg-white">
         <div className="container-page grid grid-cols-1 gap-x-8 gap-y-10 py-14 sm:grid-cols-2 lg:grid-cols-4">
           {trust.map(({ icon: Icon, title, body }) => (
             <div key={title} className="flex gap-3.5">

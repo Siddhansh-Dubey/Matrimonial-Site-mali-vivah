@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;0,800;1,500&family=Inter:wght@400;500;600;700&family=Great+Vibes&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -5,6 +7,7 @@
 :root {
   --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-display: 'Playfair Display', Georgia, serif;
+  --font-script: 'Great Vibes', 'Playfair Display', cursive;
 }
 
 @layer base {
@@ -48,5 +51,17 @@
   }
   .label {
     @apply mb-1.5 block text-sm font-medium text-stone-700;
+  }
+
+  /* Hero float animation */
+  @keyframes float-soft {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+  }
+  .animate-float-soft {
+    animation: float-soft 5s ease-in-out infinite;
+  }
+  .animate-float-soft-delayed {
+    animation: float-soft 6s ease-in-out 1.2s infinite;
   }
 }
