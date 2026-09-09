@@ -6,6 +6,7 @@ import { useI18n } from '@/lib/i18n/provider'
 import { HeroSection } from '@/components/home/hero-section'
 import { WhyChooseSection } from '@/components/home/why-choose-section'
 import { SearchMatchesSection } from '@/components/home/search-matches-section'
+import { FeaturedProfilesSection } from '@/components/home/featured-profiles-section'
 
 export default function HomePage() {
   const { t } = useI18n()
@@ -42,6 +43,7 @@ export default function HomePage() {
       <HeroSection />
       <WhyChooseSection />
       <SearchMatchesSection />
+      <FeaturedProfilesSection />
 
       {/* Trust bar */}
       <section className="border-b border-stone-200 bg-white">
