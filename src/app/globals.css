@@ -53,6 +53,10 @@
     @apply mb-1.5 block text-sm font-medium text-stone-700;
   }
 
+  .label-white {
+    @apply block text-[11px] font-semibold uppercase tracking-[0.16em] text-white/75;
+  }
+
   /* Hero float animation */
   @keyframes float-soft {
     0%, 100% { transform: translateY(0); }
