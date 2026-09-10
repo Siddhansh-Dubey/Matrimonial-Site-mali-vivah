@@ -90,16 +90,64 @@ export function LoginForm() {
         return
       }
 
-      const storedPhone =
+      // Prefer the mobile stored in public.profiles; fall back to the auth
+      // metadata for accounts created before the profiles table existed.
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('mobile')
+        .eq('id', data.user.id)
+        .maybeSingle()
+
+      const metaPhone =
         data.user.phone ||
         (typeof data.user.user_metadata?.phone === 'string' ? data.user.user_metadata.phone : '') ||
         (typeof data.user.user_metadata?.mobile === 'string' ? data.user.user_metadata.mobile : '')
 
-      const storedDigits = lastTenDigits(storedPhone)
+      const storedDigits = lastTenDigits(profile?.mobile ?? metaPhone)
       if (storedDigits && storedDigits !== parsed.data.mobile) {
         await supabase.auth.signOut()
         setFormError(t('login.error.mismatch'))
         return
+      }
+
+      if (!profile) {
+        // Self-heal: create the missing profile row for pre-migration accounts.
+        // Prefer the sign-up-time metadata values over what was just typed.
+        const metaName =
+          typeof data.user.user_metadata?.full_name === 'string'
+            ? data.user.user_metadata.full_name.trim().slice(0, 80)
+            : ''
+        const metaForWhom = data.user.user_metadata?.for_whom
+        const { error: healError } = await supabase.from('profiles').insert({
+          id: data.user.id,
+          email: (data.user.email ?? parsed.data.email).toLowerCase(),
+          full_name: metaName.length >= 2 ? metaName : 'Mali Vivah Member',
+          mobile: lastTenDigits(metaPhone) || parsed.data.mobile,
+          for_whom: metaForWhom === 'son' || metaForWhom === 'daughter' ? metaForWhom : 'self',
+        })
+        if (healError) {
+          console.warn('[login] profile backfill skipped:', healError.message)
+        }
+      } else if (!profile.mobile) {
+        // Profile exists but has no mobile on record — fill it from the
+        // sign-up metadata (never from typed input, to avoid lock-outs).
+        const metaDigits = lastTenDigits(metaPhone)
+        if (metaDigits) {
+          const { error: healError } = await supabase
+            .from('profiles')
+            .update({ mobile: metaDigits })
+            .eq('id', data.user.id)
+          if (healError) {
+            console.warn('[login] profile mobile backfill skipped:', healError.message)
+          }
+        }
+      }
+
+      // Audit the login (last_login_at / login_count / login_history row).
+      // Non-fatal: a logging failure must never block a successful login.
+      const { error: auditError } = await supabase.rpc('record_login')
+      if (auditError) {
+        console.warn('[login] record_login skipped:', auditError.message)
       }
 
       if (remember) {

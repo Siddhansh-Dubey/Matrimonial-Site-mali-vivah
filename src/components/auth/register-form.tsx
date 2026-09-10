@@ -114,6 +114,26 @@ export function RegisterForm() {
         return
       }
 
+      // The `handle_new_user` DB trigger creates the public.profiles row
+      // automatically on sign-up (even when email confirmation is pending and
+      // there is no session yet). When we DO have a session, upsert the same
+      // row as a belt-and-braces guarantee — any failure here is non-fatal.
+      if (data.session) {
+        const { error: profileError } = await supabase.from('profiles').upsert(
+          {
+            id: data.user.id,
+            email: parsed.data.email.toLowerCase(),
+            full_name: parsed.data.name,
+            mobile: parsed.data.mobile,
+            for_whom: parsed.data.forWhom,
+          },
+          { onConflict: 'id' }
+        )
+        if (profileError) {
+          console.warn('[register] profile upsert skipped:', profileError.message)
+        }
+      }
+
       if (data.session) {
         setSuccess({ kind: 'done' })
       } else {
