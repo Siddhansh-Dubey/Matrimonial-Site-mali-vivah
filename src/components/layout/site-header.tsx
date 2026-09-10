@@ -9,8 +9,10 @@ import { LanguageToggle } from '@/components/ui/language-toggle'
 
 const NAV = [
   { href: '/', key: 'nav.home' },
-  { href: '/search?lookingFor=bride', key: 'nav.brides' },
-  { href: '/search?lookingFor=groom', key: 'nav.grooms' },
+  { href: '/brides', key: 'nav.brides' },
+  { href: '/grooms', key: 'nav.grooms' },
+  { href: '/search?lookingFor=bride', key: 'nav.searchBrides' },
+  { href: '/search?lookingFor=groom', key: 'nav.searchGrooms' },
   { href: '/success-stories', key: 'nav.stories' },
   { href: '/packages', key: 'nav.packages' },
   { href: '/about', key: 'nav.about' },
