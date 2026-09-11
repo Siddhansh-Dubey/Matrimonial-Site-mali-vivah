@@ -204,6 +204,18 @@ export function ProfileWizard() {
     }
     const supabase = createClient()
 
+    // Safety net: guarantees our account row (public.profiles) and the draft
+    // matrimony rows exist BEFORE we write. Accounts can silently be missing
+    // them (e.g. sign-up with a mobile already claimed by another member),
+    // and a missing profiles row is exactly what trips the
+    // "matrimony_profiles_user_id_fkey" foreign key error. Non-fatal: if the
+    // RPC is not installed yet (schema not updated), we simply continue and
+    // let the upsert below behave as before.
+    const { error: ensureError } = await supabase.rpc('ensure_my_profile')
+    if (ensureError) {
+      console.warn('[profile] ensure_my_profile skipped:', ensureError.message)
+    }
+
     const mpPayload = {
       user_id: userId,
       profile_for: profileFor,

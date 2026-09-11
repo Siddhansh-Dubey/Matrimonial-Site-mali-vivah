@@ -118,19 +118,29 @@ export function RegisterForm() {
       // automatically on sign-up (even when email confirmation is pending and
       // there is no session yet). When we DO have a session, upsert the same
       // row as a belt-and-braces guarantee — any failure here is non-fatal.
+      // The mobile is applied in a SEPARATE update because profiles.mobile is
+      // UNIQUE: a phone already claimed by another account must not make the
+      // whole upsert fail (the row itself is what matters).
       if (data.session) {
         const { error: profileError } = await supabase.from('profiles').upsert(
           {
             id: data.user.id,
             email: parsed.data.email.toLowerCase(),
             full_name: parsed.data.name,
-            mobile: parsed.data.mobile,
             for_whom: parsed.data.forWhom,
           },
           { onConflict: 'id' }
         )
         if (profileError) {
           console.warn('[register] profile upsert skipped:', profileError.message)
+        } else {
+          const { error: mobileError } = await supabase
+            .from('profiles')
+            .update({ mobile: parsed.data.mobile })
+            .eq('id', data.user.id)
+          if (mobileError) {
+            console.warn('[register] mobile backfill skipped:', mobileError.message)
+          }
         }
       }
 

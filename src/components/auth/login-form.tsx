@@ -112,7 +112,11 @@ export function LoginForm() {
 
       if (!profile) {
         // Self-heal: create the missing profile row for pre-migration accounts.
-        // Prefer the sign-up-time metadata values over what was just typed.
+        // Insert WITHOUT the mobile first — profiles.mobile is UNIQUE, and a
+        // phone already claimed by another account must not block row creation
+        // (a missing profiles row is what later causes the
+        // "matrimony_profiles_user_id_fkey" foreign key error). The mobile is
+        // backfilled separately; a failure there is non-fatal.
         const metaName =
           typeof data.user.user_metadata?.full_name === 'string'
             ? data.user.user_metadata.full_name.trim().slice(0, 80)
@@ -122,11 +126,23 @@ export function LoginForm() {
           id: data.user.id,
           email: (data.user.email ?? parsed.data.email).toLowerCase(),
           full_name: metaName.length >= 2 ? metaName : 'Mali Vivah Member',
-          mobile: lastTenDigits(metaPhone) || parsed.data.mobile,
           for_whom: metaForWhom === 'son' || metaForWhom === 'daughter' ? metaForWhom : 'self',
         })
         if (healError) {
           console.warn('[login] profile backfill skipped:', healError.message)
+        } else {
+          const healMobile = [lastTenDigits(metaPhone), parsed.data.mobile].find((m) =>
+            /^[6-9]\d{9}$/.test(m),
+          )
+          if (healMobile) {
+            const { error: mobileError } = await supabase
+              .from('profiles')
+              .update({ mobile: healMobile })
+              .eq('id', data.user.id)
+            if (mobileError) {
+              console.warn('[login] mobile backfill skipped:', mobileError.message)
+            }
+          }
         }
       } else if (!profile.mobile) {
         // Profile exists but has no mobile on record — fill it from the
