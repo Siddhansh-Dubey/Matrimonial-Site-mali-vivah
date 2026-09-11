@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import {
   BadgeCheck,
+  Crown,
   Eye,
   Heart,
   ImagePlus,
@@ -14,6 +15,7 @@ import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
 import { photoUrl } from '@/lib/profile/photos'
 import { ageFromDate } from '@/lib/profile/profile-schema'
+import { getActiveSubscription } from '@/lib/profile/subscription'
 import type { MatrimonyProfile, PartnerPreferences } from '@/lib/supabase/database.types'
 
 export const metadata: Metadata = { title: 'My Profile' }
@@ -33,11 +35,12 @@ export default async function ProfileDashboardPage({
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [profileRes, mpRes, ppRes, photoRes] = await Promise.all([
+  const [profileRes, mpRes, ppRes, photoRes, subscription] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
     supabase.from('matrimony_profiles').select('*').eq('user_id', user.id).maybeSingle(),
     supabase.from('partner_preferences').select('*').eq('profile_id', user.id).maybeSingle(),
     supabase.from('profile_photos').select('*').eq('profile_id', user.id).order('sort_order'),
+    getActiveSubscription(supabase, user.id),
   ])
 
   const fullName = profileRes.data?.full_name ?? 'Member'
@@ -71,12 +74,45 @@ export default async function ProfileDashboardPage({
     <section className="bg-cream">
       <div className="container-page py-10 sm:py-14">
         {published && (
-          <div className="mx-auto mb-8 flex max-w-3xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
+          <div className="mx-auto mb-6 flex max-w-3xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
             <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
             <span>
               Your profile is now live and visible in Browse &amp; Search. Families can now find you
               and express interest.
             </span>
+          </div>
+        )}
+
+        {subscription ? (
+          <div className="mx-auto mb-8 flex max-w-3xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
+            <Crown className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+            <span>
+              Active package till{' '}
+              <span className="font-semibold">
+                {new Date(subscription.expires_at).toLocaleDateString('en-IN', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                })}
+              </span>{' '}
+              — all profile details are unlocked for you.{' '}
+              <Link href="/packages" className="font-semibold underline underline-offset-2">
+                Manage
+              </Link>
+            </span>
+          </div>
+        ) : (
+          <div className="mx-auto mb-8 flex max-w-3xl flex-col gap-3 rounded-2xl border border-gold-400/50 bg-gold-100/50 px-5 py-4 text-sm text-maroon-deep sm:flex-row sm:items-center">
+            <span>
+              You are on the <span className="font-semibold">free plan</span> — other profiles show
+              only photos and occupations to you.
+            </span>
+            <Link
+              href="/packages"
+              className="inline-flex items-center gap-1.5 rounded-full bg-maroon px-5 py-2 text-xs font-bold text-white hover:bg-maroon-dark sm:ml-auto"
+            >
+              <Crown className="h-3.5 w-3.5" /> View packages
+            </Link>
           </div>
         )}
 

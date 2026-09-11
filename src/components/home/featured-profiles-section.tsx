@@ -178,7 +178,7 @@ function ProfileCard({ profile }: { profile: Profile }) {
         </p>
 
         <Link
-          href={gender === 'bride' ? '/search?lookingFor=bride' : '/search?lookingFor=groom'}
+          href={gender === 'bride' ? '/brides' : '/grooms'}
           className="mt-5 inline-flex items-center justify-center rounded-full border-[1.5px] border-brand-300/80 bg-brand-50 px-9 py-2.5 text-sm font-bold text-brand-800 transition-all hover:border-brand-600 hover:bg-brand-600 hover:text-white"
         >
           {t('home.featured.knowMore')}

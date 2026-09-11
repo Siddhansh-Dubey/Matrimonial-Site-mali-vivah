@@ -5,11 +5,15 @@ import { maskName } from '@/lib/profile/mask'
 import type { MatchCard } from '@/lib/supabase/database.types'
 
 /**
- * Build masked, contact-free match cards for a list of user ids.
+ * Build match cards for a list of user ids.
  * Server-only: uses the service-role client to read profile names/photos that
  * are not reachable through the user's own RLS-scoped session.
+ *
+ * When `isPaid` is true the full name is included (`name_full`) so paid
+ * viewers see unmasked names; masking of the remaining fields happens in the
+ * MatchCard component. Contact details are never included here.
  */
-export async function buildMatchCards(userIds: string[]): Promise<MatchCard[]> {
+export async function buildMatchCards(userIds: string[], isPaid = false): Promise<MatchCard[]> {
   if (userIds.length === 0) return []
   const admin = createAdminClient()
 
@@ -40,7 +44,9 @@ export async function buildMatchCards(userIds: string[]): Promise<MatchCard[]> {
     return {
       user_id: id,
       name: maskName(full),
+      name_full: isPaid ? full : null,
       age: ageFromDate(mp?.date_of_birth) ?? 0,
+      gender: mp?.gender ?? null,
       height_cm: mp?.height_cm ?? null,
       sub_community: mp?.sub_community ?? null,
       marital_status: mp?.marital_status ?? 'never_married',
@@ -51,6 +57,7 @@ export async function buildMatchCards(userIds: string[]): Promise<MatchCard[]> {
       diet: mp?.diet ?? 'vegetarian',
       photo: photoByProfile.get(id) ?? null,
       has_photo: photoByProfile.has(id),
+      viewer_is_paid: isPaid,
     }
   })
 }

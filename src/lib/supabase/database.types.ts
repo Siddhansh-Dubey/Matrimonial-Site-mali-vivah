@@ -5,6 +5,7 @@
  * - supabase/migrations/20260910000000_auth_profiles.sql
  * - supabase/migrations/20260911000000_matrimony_profiles.sql
  * - supabase/migrations/20260911120000_repair_missing_profiles.sql
+ * - supabase/migrations/20260912000000_packages_mutual.sql
  *
  * If you change either SQL file, update this file to match (or regenerate it
  * with `supabase gen types typescript --project-id <ref>` and replace this file).
@@ -18,6 +19,8 @@
  * - interests            — Express Interest (sender → receiver)
  * - shortlists           — saved / favourite profiles
  * - profile_views        — "who viewed my profile"
+ * - packages             — membership plans for purchase
+ * - subscriptions        — one row per purchase (user → package)
  */
 
 export type Json =
@@ -419,6 +422,99 @@ export type Database = {
           },
         ]
       }
+      packages: {
+        Row: {
+          id: number
+          slug: string
+          name: string
+          description: string
+          price_inr: number
+          duration_days: number
+          features: string[]
+          is_active: boolean
+          sort_order: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: never
+          slug: string
+          name: string
+          description?: string
+          price_inr?: number
+          duration_days?: number
+          features?: string[]
+          is_active?: boolean
+          sort_order?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: never
+          slug?: string
+          name?: string
+          description?: string
+          price_inr?: number
+          duration_days?: number
+          features?: string[]
+          is_active?: boolean
+          sort_order?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      subscriptions: {
+        Row: {
+          id: number
+          user_id: string
+          package_id: number | null
+          package_slug: string | null
+          status: Database['public']['Enums']['subscription_status']
+          started_at: string
+          expires_at: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: never
+          user_id: string
+          package_id?: number | null
+          package_slug?: string | null
+          status?: Database['public']['Enums']['subscription_status']
+          started_at?: string
+          expires_at?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: never
+          user_id?: string
+          package_id?: number | null
+          package_slug?: string | null
+          status?: Database['public']['Enums']['subscription_status']
+          started_at?: string
+          expires_at?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'subscriptions_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'subscriptions_package_id_fkey'
+            columns: ['package_id']
+            isOneToOne: false
+            referencedRelation: 'packages'
+            referencedColumns: ['id']
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -449,6 +545,25 @@ export type Database = {
         }
         Returns: Json
       }
+      has_active_subscription: {
+        Args: {
+          p_user_id?: string | null
+        }
+        Returns: boolean
+      }
+      mutual_interest_exists: {
+        Args: {
+          p_a: string
+          p_b: string
+        }
+        Returns: boolean
+      }
+      get_profile_contact: {
+        Args: {
+          p_user_id: string
+        }
+        Returns: string | null
+      }
     }
     Enums: {
       for_whom: 'self' | 'son' | 'daughter'
@@ -457,6 +572,7 @@ export type Database = {
       diet: 'vegetarian' | 'non_vegetarian' | 'eggetarian' | 'jain' | 'vegan'
       profile_status: 'draft' | 'pending_review' | 'active' | 'hidden' | 'rejected'
       interest_status: 'pending' | 'accepted' | 'declined' | 'withdrawn'
+      subscription_status: 'active' | 'expired' | 'cancelled'
     }
     CompositeTypes: {
       [_ in never]: never
@@ -477,14 +593,21 @@ export type PartnerPreferencesInsert = Database['public']['Tables']['partner_pre
 export type ProfilePhoto = Database['public']['Tables']['profile_photos']['Row']
 export type Interest = Database['public']['Tables']['interests']['Row']
 export type Shortlist = Database['public']['Tables']['shortlists']['Row']
+export type PackageRow = Database['public']['Tables']['packages']['Row']
+export type SubscriptionRow = Database['public']['Tables']['subscriptions']['Row']
 
 export type Gender = Database['public']['Enums']['gender']
 export type MaritalStatus = Database['public']['Enums']['marital_status']
 export type Diet = Database['public']['Enums']['diet']
 export type ProfileStatus = Database['public']['Enums']['profile_status']
 export type InterestStatus = Database['public']['Enums']['interest_status']
+export type SubscriptionStatus = Database['public']['Enums']['subscription_status']
 
-/** A single card returned by the search_matches() RPC. */
+/**
+ * A single card returned by the search_matches() RPC.
+ * v2 keys (gender / name_full / viewer_is_paid) are optional so the app also
+ * works against a database where the packages migration has not been applied yet.
+ */
 export type MatchCard = {
   user_id: string
   name: string
@@ -499,9 +622,12 @@ export type MatchCard = {
   diet: Diet
   photo: string | null
   has_photo: boolean
+  gender?: Gender | null
+  name_full?: string | null
+  viewer_is_paid?: boolean | null
 }
 
-/** A single card returned by the get_public_profile() RPC. */
+/** A single card returned by the get_public_profile() RPC (v2 keys optional, see above). */
 export type PublicProfileCard = {
   id: string
   name: string
@@ -523,4 +649,9 @@ export type PublicProfileCard = {
   about_me: string | null
   hobbies: string[]
   photos: string[]
+  gender?: Gender | null
+  name_full?: string | null
+  viewer_is_paid?: boolean | null
+  mutual_interest?: boolean | null
+  contact_phone?: string | null
 }

@@ -10,8 +10,8 @@ import { isSupabaseConfigured } from '@/lib/env'
 
 const NAV = [
   { href: '/', key: 'nav.home' },
-  { href: '/search?lookingFor=bride', key: 'nav.brides' },
-  { href: '/search?lookingFor=groom', key: 'nav.grooms' },
+  { href: '/brides', key: 'nav.brides' },
+  { href: '/grooms', key: 'nav.grooms' },
   { href: '/success-stories', key: 'nav.stories' },
   { href: '/packages', key: 'nav.packages' },
   { href: '/about', key: 'nav.about' },
