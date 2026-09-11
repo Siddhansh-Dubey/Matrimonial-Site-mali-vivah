@@ -367,7 +367,13 @@ export function ProfileWizard() {
       const path = `${userId}/${Date.now()}-${safeName}`
       const { error } = await supabase.storage.from('profile-photos').upload(path, file, { upsert: false })
       if (error) {
-        setFormError(`[photo] ${error.message}`)
+        // Storage enforces its own RLS on storage.objects (independent of the
+        // profile_photos table policies). This exact message means the write
+        // policies have not been installed on the project yet.
+        const hint = /row-level security/i.test(error.message)
+          ? ' — the photo storage policies are missing on the database. Run supabase/migrations/20260911130000_photo_storage_policies.sql in the Supabase SQL Editor, then try again.'
+          : ''
+        setFormError(`[photo] ${error.message}${hint}`)
         return
       }
       const isFirst = photos.length === 0
@@ -377,6 +383,8 @@ export function ProfileWizard() {
         .select()
         .single()
       if (insertError) {
+        // Don't leave an orphaned object in Storage when the DB row failed.
+        await supabase.storage.from('profile-photos').remove([path])
         setFormError(`[photo] ${insertError.message}`)
         return
       }
