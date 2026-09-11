@@ -4,6 +4,7 @@
  * Mirrors:
  * - supabase/migrations/20260910000000_auth_profiles.sql
  * - supabase/migrations/20260911000000_matrimony_profiles.sql
+ * - supabase/migrations/20260911120000_repair_missing_profiles.sql
  *
  * If you change either SQL file, update this file to match (or regenerate it
  * with `supabase gen types typescript --project-id <ref>` and replace this file).
@@ -424,6 +425,10 @@ export type Database = {
     }
     Functions: {
       record_login: {
+        Args: Record<string, never>
+        Returns: undefined
+      }
+      ensure_my_profile: {
         Args: Record<string, never>
         Returns: undefined
       }
