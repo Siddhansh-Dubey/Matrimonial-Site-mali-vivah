@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Five migrations, run in filename order:
+Six migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -24,6 +24,9 @@ Five migrations, run in filename order:
    `get_profile_contact()` gating RPCs, and additive v2 flags on the browse
    RPCs (`gender`, `name_full` for paid viewers, `viewer_is_paid`,
    `mutual_interest`, `contact_phone` when paid + mutual).
+6. `20260912130000_public_profile_browse.sql` — lets anonymous visitors see a
+   safe five-profile preview on Brides and Grooms, and includes a member's own
+   published profile in the gender-specific browse results.
 
 ## What the scan found
 
@@ -111,7 +114,8 @@ Restart `npm run dev` after changing env vars.
    (`20260911000000_matrimony_profiles.sql`,
    `20260911120000_repair_missing_profiles.sql`,
    `20260911130000_photo_storage_policies.sql`,
-   `20260912000000_packages_mutual.sql`) and press **Run** after each.
+   `20260912000000_packages_mutual.sql`,
+   `20260912130000_public_profile_browse.sql`) and press **Run** after each.
 4. You should see `Success. No rows returned` for each.
 5. Re-running any of the scripts is safe (all statements are idempotent).
 

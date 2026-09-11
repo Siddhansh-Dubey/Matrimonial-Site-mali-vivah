@@ -10,10 +10,12 @@ import type { MatchCard as MatchCardType } from '@/lib/supabase/database.types'
 export function BrowseGrid({
   matches,
   isPaid,
+  isGuest = false,
   clearHref = '/search',
 }: {
   matches: MatchCardType[]
   isPaid: boolean
+  isGuest?: boolean
   clearHref?: string
 }) {
   return (
@@ -22,13 +24,23 @@ export function BrowseGrid({
         <p className="text-sm text-stone-500">
           {matches.length} {matches.length === 1 ? 'profile' : 'profiles'} found
         </p>
-        {!isPaid && matches.length > 0 && (
+        {isGuest && matches.length > 0 ? (
           <Link
-            href="/packages"
+            href="/register"
             className="inline-flex items-center gap-1.5 rounded-full bg-maroon px-4 py-1.5 text-xs font-bold text-white hover:bg-maroon-dark"
           >
-            <Lock className="h-3.5 w-3.5" /> Unlock full details
+            Create a free profile
           </Link>
+        ) : (
+          !isPaid &&
+          matches.length > 0 && (
+            <Link
+              href="/packages"
+              className="inline-flex items-center gap-1.5 rounded-full bg-maroon px-4 py-1.5 text-xs font-bold text-white hover:bg-maroon-dark"
+            >
+              <Lock className="h-3.5 w-3.5" /> Unlock full details
+            </Link>
+          )
         )}
       </div>
 

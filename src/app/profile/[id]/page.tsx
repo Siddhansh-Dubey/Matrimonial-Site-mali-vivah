@@ -28,23 +28,35 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
 
+  // The detail page is also a safe public preview. Logged-out visitors can
+  // follow a card from /brides or /grooms, but they still see the same masked
+  // free-view fields and cannot record a profile view or take member actions.
   const { data } = await supabase.rpc('get_public_profile', { p_user_id: params.id })
   const profile = data as PublicProfileCard | null
   if (!profile) notFound()
 
   // Visibility verdict — prefers the v2 RPC flags, falls back to live checks
   // when the packages migration has not been applied yet.
-  const visibility = await getProfileVisibility(supabase, user.id, params.id, {
-    rpcPaid: profile.viewer_is_paid,
-    rpcMutual: profile.mutual_interest,
-    rpcContact: profile.contact_phone,
-  })
+  const visibility = user
+    ? await getProfileVisibility(supabase, user.id, params.id, {
+        rpcPaid: profile.viewer_is_paid,
+        rpcMutual: profile.mutual_interest,
+        rpcContact: profile.contact_phone,
+      })
+    : {
+        isPaid: false,
+        mutual: false,
+        canSeeDetails: false,
+        canSeePhone: false,
+        phone: null,
+      }
   const { isPaid, mutual, canSeeDetails, canSeePhone, phone } = visibility
 
   // Record the view (best effort — never block the page).
-  await supabase.from('profile_views').insert({ viewer_id: user.id, viewed_id: params.id })
+  if (user) {
+    await supabase.from('profile_views').insert({ viewer_id: user.id, viewed_id: params.id })
+  }
 
   const photos = (profile.photos ?? []).map(photoUrl).filter((p): p is string => Boolean(p))
   const displayName = canSeeDetails && profile.name_full ? profile.name_full : profile.name
@@ -67,14 +79,14 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
               <Lock className="h-4 w-4" /> Free preview
             </span>
             <span className="text-maroon/80">
-              Only the photo and occupation are visible. Purchase any package to unlock every
-              detail.
+              Only the photo and occupation are visible.{' '}
+              {user ? 'Purchase any package to unlock every detail.' : 'Register to explore more matches.'}
             </span>
             <Link
-              href="/packages"
+              href={user ? '/packages' : '/register'}
               className="inline-flex items-center gap-1.5 rounded-full bg-maroon px-5 py-2 text-xs font-bold text-white hover:bg-maroon-dark sm:ml-auto"
             >
-              View packages
+              {user ? 'View packages' : 'Register free'}
             </Link>
           </div>
         )}
@@ -251,7 +263,25 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
             </div>
 
             <div className="mt-7 border-t border-stone-100 pt-6">
-              <ProfileActions profileId={profile.id} />
+              {user ? (
+                profile.id === user.id ? (
+                  <div className="rounded-2xl bg-brand-50 px-4 py-4 text-center">
+                    <p className="text-sm font-semibold text-maroon">This is your published profile.</p>
+                    <Link href="/profile/edit" className="btn-primary mt-3">
+                      Edit your profile
+                    </Link>
+                  </div>
+                ) : (
+                  <ProfileActions profileId={profile.id} />
+                )
+              ) : (
+                <div className="rounded-2xl bg-brand-50 px-4 py-4 text-center">
+                  <p className="text-sm font-semibold text-maroon">Want to connect with this profile?</p>
+                  <Link href="/register" className="btn-primary mt-3">
+                    Register free
+                  </Link>
+                </div>
+              )}
             </div>
           </div>
         </div>
