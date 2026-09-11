@@ -163,7 +163,7 @@ export function RegisterForm() {
           {!finished && (
             <p className="mt-3 break-words text-sm font-semibold text-stone-800">{success.email}</p>
           )}
-          <Link href={finished ? '/' : '/login'} className="btn-primary mt-8 w-full">
+          <Link href={finished ? '/profile' : '/login'} className="btn-primary mt-8 w-full">
             {t(finished ? 'register.done.cta' : 'register.success.login')}
           </Link>
         </div>

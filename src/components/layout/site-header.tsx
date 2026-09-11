@@ -1,11 +1,12 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { useState } from 'react'
-import { ArrowRight, Menu, UserRound, X } from 'lucide-react'
+import { usePathname, useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { ArrowRight, LogOut, Menu, UserRound, X } from 'lucide-react'
 import { useI18n } from '@/lib/i18n/provider'
 import { LanguageToggle } from '@/components/ui/language-toggle'
+import { isSupabaseConfigured } from '@/lib/env'
 
 const NAV = [
   { href: '/', key: 'nav.home' },
@@ -51,7 +52,44 @@ function BrandMark() {
 export function SiteHeader() {
   const { t } = useI18n()
   const pathname = usePathname()
+  const router = useRouter()
   const [open, setOpen] = useState(false)
+  const [userId, setUserId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return
+    let mounted = true
+    async function refresh() {
+      const { createClient } = await import('@/lib/supabase/client')
+      const supabase = createClient()
+      const { data } = await supabase.auth.getUser()
+      if (mounted) setUserId(data.user?.id ?? null)
+    }
+    refresh()
+
+    let sub: { unsubscribe: () => void } | undefined
+    import('@/lib/supabase/client').then(({ createClient }) => {
+      const supabase = createClient()
+      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        setUserId(session?.user?.id ?? null)
+      })
+      sub = data.subscription
+    })
+    return () => {
+      mounted = false
+      sub?.unsubscribe?.()
+    }
+  }, [])
+
+  async function signOut() {
+    if (!isSupabaseConfigured) return
+    const { createClient } = await import('@/lib/supabase/client')
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    setUserId(null)
+    router.push('/')
+    router.refresh()
+  }
 
   return (
     <header className="sticky top-0 z-50 bg-cream/95 backdrop-blur">
@@ -91,14 +129,34 @@ export function SiteHeader() {
 
         <div className="hidden items-center gap-3 lg:flex">
           <LanguageToggle />
-          <Link
-            href="/login"
-            className="group inline-flex items-center gap-2 rounded-full bg-maroon px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-maroon/25 transition-all hover:bg-maroon-dark"
-          >
-            <UserRound className="h-4 w-4" aria-hidden />
-            {t('nav.loginRegister')}
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
-          </Link>
+          {userId ? (
+            <>
+              <Link
+                href="/profile"
+                className="group inline-flex items-center gap-2 rounded-full bg-maroon px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-maroon/25 transition-all hover:bg-maroon-dark"
+              >
+                <UserRound className="h-4 w-4" aria-hidden />
+                {t('nav.myProfile')}
+              </Link>
+              <button
+                type="button"
+                onClick={signOut}
+                className="inline-flex items-center gap-2 rounded-full border border-stone-300 bg-white px-4 py-2.5 text-sm font-semibold text-stone-700 transition-all hover:border-brand-400 hover:text-brand-700"
+              >
+                <LogOut className="h-4 w-4" aria-hidden />
+                {t('nav.signOut')}
+              </button>
+            </>
+          ) : (
+            <Link
+              href="/login"
+              className="group inline-flex items-center gap-2 rounded-full bg-maroon px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-maroon/25 transition-all hover:bg-maroon-dark"
+            >
+              <UserRound className="h-4 w-4" aria-hidden />
+              {t('nav.loginRegister')}
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden />
+            </Link>
+          )}
         </div>
 
         <button
@@ -127,18 +185,44 @@ export function SiteHeader() {
             ))}
             <div className="mt-3 flex flex-col gap-2.5 border-t border-stone-200/70 pt-4">
               <LanguageToggle />
-              <Link
-                href="/login"
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-maroon px-5 py-3 text-sm font-semibold text-white"
-                onClick={() => setOpen(false)}
-              >
-                <UserRound className="h-4 w-4" aria-hidden />
-                {t('nav.loginRegister')}
-                <ArrowRight className="h-4 w-4" aria-hidden />
-              </Link>
-              <Link href="/register" className="btn-secondary" onClick={() => setOpen(false)}>
-                {t('nav.register')}
-              </Link>
+              {userId ? (
+                <>
+                  <Link
+                    href="/profile"
+                    className="inline-flex items-center justify-center gap-2 rounded-full bg-maroon px-5 py-3 text-sm font-semibold text-white"
+                    onClick={() => setOpen(false)}
+                  >
+                    <UserRound className="h-4 w-4" aria-hidden />
+                    {t('nav.myProfile')}
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false)
+                      signOut()
+                    }}
+                    className="btn-secondary"
+                  >
+                    <LogOut className="h-4 w-4" aria-hidden />
+                    {t('nav.signOut')}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href="/login"
+                    className="inline-flex items-center justify-center gap-2 rounded-full bg-maroon px-5 py-3 text-sm font-semibold text-white"
+                    onClick={() => setOpen(false)}
+                  >
+                    <UserRound className="h-4 w-4" aria-hidden />
+                    {t('nav.loginRegister')}
+                    <ArrowRight className="h-4 w-4" aria-hidden />
+                  </Link>
+                  <Link href="/register" className="btn-secondary" onClick={() => setOpen(false)}>
+                    {t('nav.register')}
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         </div>
