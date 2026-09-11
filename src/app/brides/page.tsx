@@ -38,6 +38,7 @@ export default async function BridesPage({ searchParams }: { searchParams?: Para
   const city = searchParams?.location
   const subCommunity = searchParams?.subCommunity
 
+  const isGuest = !user
   const [{ data, error }, isPaid] = await Promise.all([
     supabase.rpc('search_matches', {
       p_looking_for: 'female',
@@ -45,9 +46,11 @@ export default async function BridesPage({ searchParams }: { searchParams?: Para
       p_max_age: maxAge,
       p_city: city || null,
       p_sub_community: subCommunity || null,
-      p_limit: 120,
+      // Logged-out visitors get the five-card preview; members can browse all
+      // matching active profiles (including the profile they created).
+      p_limit: isGuest ? 5 : 200,
     }),
-    hasActiveSubscription(supabase, user.id),
+    hasActiveSubscription(supabase, user?.id),
   ])
 
   // Defensive: the RPC already filters by gender, but never show a groom here
@@ -67,6 +70,11 @@ export default async function BridesPage({ searchParams }: { searchParams?: Para
           <p className="mt-3 text-sm text-stone-600 sm:text-base">
             Verified Mali Samaj bride profiles, contact details kept private.
           </p>
+          {isGuest && (
+            <p className="mt-3 text-sm font-semibold text-maroon">
+              Preview the 5 newest bride profiles — register to browse the full directory.
+            </p>
+          )}
         </div>
 
         <form
@@ -111,7 +119,9 @@ export default async function BridesPage({ searchParams }: { searchParams?: Para
           </p>
         )}
 
-        {!error && <BrowseGrid matches={matches} isPaid={isPaid} clearHref="/brides" />}
+        {!error && (
+          <BrowseGrid matches={matches} isPaid={isPaid} isGuest={isGuest} clearHref="/brides" />
+        )}
       </div>
     </section>
   )
