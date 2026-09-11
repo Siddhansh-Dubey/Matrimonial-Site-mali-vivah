@@ -1,7 +1,15 @@
 # Supabase database — Mali Vivah
 
-This folder holds everything the app needs to **store login & registration data
-for all users** in Supabase.
+This folder holds everything the app needs to store **accounts, matrimony
+profiles and the matchmaking flow** (browse, express interest, shortlist,
+profile views) in Supabase.
+
+Two migrations, run in filename order:
+
+1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
+2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
+   member profile, photos, partner preferences, interests, shortlists, views,
+   plus the `search_matches()` / `get_public_profile()` browse RPCs.
 
 ## What the scan found
 
@@ -84,9 +92,11 @@ Restart `npm run dev` after changing env vars.
 
 1. Supabase Dashboard → **SQL Editor** → New query.
 2. Paste the full contents of
-   `supabase/migrations/20260910000000_auth_profiles.sql`.
-3. Press **Run**. You should see `Success. No rows returned`.
-4. Re-running the same script is safe (all statements are idempotent).
+   `supabase/migrations/20260910000000_auth_profiles.sql`, press **Run**.
+3. Then paste `supabase/migrations/20260911000000_matrimony_profiles.sql`
+   (in that order) and press **Run**.
+4. You should see `Success. No rows returned` for each.
+5. Re-running either script is safe (all statements are idempotent).
 
 **Option B — Supabase CLI:**
 
@@ -99,22 +109,24 @@ supabase db push
 
 In the Dashboard → **Table Editor** you should now see:
 
-- `profiles` (with RLS enabled badge)
-- `login_history` (with RLS enabled badge)
+- `profiles`, `login_history` (accounts)
+- `matrimony_profiles`, `profile_photos`, `partner_preferences` (the profile)
+- `interests`, `shortlists`, `profile_views` (the matchmaking actions)
 
 Quick check in the SQL Editor:
 
 ```sql
 -- Tables exist?
-select tablename from pg_tables where schemaname = 'public';
+select tablename from pg_tables where schemaname = 'public' order by 1;
 
 -- RLS enabled?
 select tablename, rowsecurity from pg_tables
-where schemaname = 'public' and tablename in ('profiles', 'login_history');
+where schemaname = 'public' order by 1;
 
--- Triggers on auth.users?
+-- Triggers on auth.users / profiles?
 select trigger_name from information_schema.triggers
-where event_object_schema = 'auth' and event_object_table = 'users';
+where (event_object_schema = 'auth' and event_object_table = 'users')
+   or (event_object_schema = 'public' and event_object_table = 'profiles');
 ```
 
 ### 5. Recommended Auth settings
@@ -150,7 +162,8 @@ Dashboard → **Authentication** → **Providers** → **Email**:
    auth metadata for pre-migration accounts); mismatch → sign out + error.
 3. Self-heals a missing profile row / missing mobile from sign-up metadata.
 4. Calls `record_login()` RPC for the audit trail (never blocks login).
-5. Redirects to `/`.
+5. Redirects to `/profile` (the dashboard) — the entry point of the
+   matrimony flow.
 
 Type-safe access everywhere via `src/lib/supabase/database.types.ts`
 (`createBrowserClient<Database>` etc.).
@@ -178,9 +191,64 @@ update public.profiles set is_active = false where email = 'user@example.com';
 update public.profiles set mobile_verified = true where email = 'user@example.com';
 ```
 
-## Extending later
+## The matrimony flow (migration 2)
 
-The matrimony profile fields (age, city, education, sub-community, photos —
-see the `TODO` in `featured-profiles-section.tsx`) belong in a **separate**
-table, e.g. `public.matrimony_profiles (user_id → profiles.id)`, so auth data
-and matchmaking data stay decoupled. Ask and it can be scaffolded the same way.
+Migration `20260911000000_matrimony_profiles.sql` adds the tables behind the
+post-login flow:
+
+```text
+public.profiles (accounts)
+    │ 1:1
+    ▼
+public.matrimony_profiles (detailed member profile) ── 1:N ── public.profile_photos
+    │ 1:1
+    ▼
+public.partner_preferences (private "what I'm looking for")
+
+public.interests    (sender_id → receiver_id, status: pending/accepted/…)
+public.shortlists   (user_id → target_id)
+public.profile_views (viewer_id → viewed_id)
+```
+
+Highlights:
+
+- **Contact privacy by design.** `email` / `mobile` live only in
+  `public.profiles` and are never returned by the browse RPCs. The
+  `search_matches()` and `get_public_profile()` functions return masked names
+  (first letter + `*`) and only match-relevant fields.
+- **Auto-seed.** A trigger on `public.profiles` creates a draft
+  `matrimony_profiles` + `partner_preferences` row for every new sign-up, so
+  the onboarding wizard (`/profile/edit`) always has a row to upsert into.
+- **Lifecycle.** `matrimony_profiles.status` is `draft` until the member
+  publishes; only `active` rows appear in Browse / Search.
+- **RLS.** Owners manage their own rows; other members can read only `active`
+  profiles (and their photos). Preferences are strictly private.
+
+The UI for this flow lives under `/profile`, `/profile/edit`, `/search`,
+`/profile/[id]`, `/interests` and `/shortlist`.
+
+## Useful admin queries (matchmaking)
+
+```sql
+-- All live profiles, newest first (age derived from date_of_birth)
+select mp.user_id, p.full_name, mp.gender,
+       floor(date_part('year', age(mp.date_of_birth)))::int as age,
+       mp.city, mp.sub_community, mp.education, mp.occupation, mp.status, mp.updated_at
+from public.matrimony_profiles mp
+join public.profiles p on p.id = mp.user_id
+order by mp.updated_at desc;
+
+-- Pending interests per receiver
+select receiver_id, count(*) as pending
+from public.interests
+where status = 'pending'
+group by receiver_id
+order by pending desc;
+
+-- Most-viewed profiles
+select viewed_id, count(*) as views
+from public.profile_views
+group by viewed_id
+order by views desc
+limit 20;
+```

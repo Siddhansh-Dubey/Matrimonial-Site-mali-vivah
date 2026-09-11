@@ -156,7 +156,7 @@ export function LoginForm() {
         window.localStorage.removeItem('mali-vivah:remember-email')
       }
 
-      router.push('/')
+      router.push('/profile')
       router.refresh()
     } catch {
       setFormError(t('login.error.generic'))
