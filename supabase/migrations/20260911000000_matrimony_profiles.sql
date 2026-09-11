@@ -544,8 +544,13 @@ BEGIN
     VALUES ('profile-photos', 'profile-photos', TRUE)
     ON CONFLICT (id) DO NOTHING;
 
-    -- Public read: active profiles' photos are viewable via signed/public URL.
-    -- Uploads are gated by the RLS policies on public.profile_photos.
+    -- Public read: photos are viewable via public URL.
+    -- Uploads are gated by Storage's OWN policies on storage.objects —
+    -- NOT by the policies on public.profile_photos. Those write policies
+    -- (INSERT / UPDATE / DELETE, scoped to each member's own folder) live in
+    -- 20260911130000_photo_storage_policies.sql; without them every
+    -- client-side upload fails with "new row violates row-level security
+    -- policy".
     DROP POLICY IF EXISTS "Public read profile photos" ON storage.objects;
     CREATE POLICY "Public read profile photos"
       ON storage.objects FOR SELECT

@@ -4,12 +4,21 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Two migrations, run in filename order:
+Four migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
    member profile, photos, partner preferences, interests, shortlists, views,
    plus the `search_matches()` / `get_public_profile()` browse RPCs.
+3. `20260911120000_repair_missing_profiles.sql` — repairs accounts silently
+   left without a `profiles` row (the cause of the wizard's
+   `matrimony_profiles_user_id_fkey` error) and adds the
+   `ensure_my_profile()` self-heal RPC.
+4. `20260911130000_photo_storage_policies.sql` — the Storage write policies
+   for the `profile-photos` bucket. Without it, uploading a photo in the
+   wizard fails with `[photo] new row violates row-level security policy`
+   (Supabase Storage enforces its own RLS on `storage.objects`, separate
+   from the `profile_photos` table policies).
 
 ## What the scan found
 
@@ -93,10 +102,12 @@ Restart `npm run dev` after changing env vars.
 1. Supabase Dashboard → **SQL Editor** → New query.
 2. Paste the full contents of
    `supabase/migrations/20260910000000_auth_profiles.sql`, press **Run**.
-3. Then paste `supabase/migrations/20260911000000_matrimony_profiles.sql`
-   (in that order) and press **Run**.
+3. Then paste the remaining migration files in filename order
+   (`20260911000000_matrimony_profiles.sql`,
+   `20260911120000_repair_missing_profiles.sql`,
+   `20260911130000_photo_storage_policies.sql`) and press **Run** after each.
 4. You should see `Success. No rows returned` for each.
-5. Re-running either script is safe (all statements are idempotent).
+5. Re-running any of the scripts is safe (all statements are idempotent).
 
 **Option B — Supabase CLI:**
 
