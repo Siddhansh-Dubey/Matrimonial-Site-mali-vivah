@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Four migrations, run in filename order:
+Five migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -19,6 +19,11 @@ Four migrations, run in filename order:
    wizard fails with `[photo] new row violates row-level security policy`
    (Supabase Storage enforces its own RLS on `storage.objects`, separate
    from the `profile_photos` table policies).
+5. `20260912000000_packages_mutual.sql` — membership packages + subscriptions,
+   the `has_active_subscription()` / `mutual_interest_exists()` /
+   `get_profile_contact()` gating RPCs, and additive v2 flags on the browse
+   RPCs (`gender`, `name_full` for paid viewers, `viewer_is_paid`,
+   `mutual_interest`, `contact_phone` when paid + mutual).
 
 ## What the scan found
 
@@ -105,7 +110,8 @@ Restart `npm run dev` after changing env vars.
 3. Then paste the remaining migration files in filename order
    (`20260911000000_matrimony_profiles.sql`,
    `20260911120000_repair_missing_profiles.sql`,
-   `20260911130000_photo_storage_policies.sql`) and press **Run** after each.
+   `20260911130000_photo_storage_policies.sql`,
+   `20260912000000_packages_mutual.sql`) and press **Run** after each.
 4. You should see `Success. No rows returned` for each.
 5. Re-running any of the scripts is safe (all statements are idempotent).
 
@@ -123,6 +129,7 @@ In the Dashboard → **Table Editor** you should now see:
 - `profiles`, `login_history` (accounts)
 - `matrimony_profiles`, `profile_photos`, `partner_preferences` (the profile)
 - `interests`, `shortlists`, `profile_views` (the matchmaking actions)
+- `packages`, `subscriptions` (memberships — migration 5)
 
 Quick check in the SQL Editor:
 
@@ -236,7 +243,34 @@ Highlights:
   profiles (and their photos). Preferences are strictly private.
 
 The UI for this flow lives under `/profile`, `/profile/edit`, `/search`,
-`/profile/[id]`, `/interests` and `/shortlist`.
+`/brides`, `/grooms`, `/profile/[id]`, `/interests`, `/shortlist` and
+`/packages`.
+
+## Visibility & phone-reveal rules (migration 5)
+
+Single source of truth: `src/lib/profile/visibility.ts`.
+
+- **Free viewer** → only `occupation` + photo are visible; every other detail is
+  masked with an upgrade prompt (browse cards, detail page, interests).
+- **Paid viewer** (any active, unexpired `subscriptions` row) → every detail is
+  visible **except** the phone number, including the full name.
+- **Phone number** → visible **iff** the viewer is paid **and** interest is
+  mutual. Mutual means an `accepted` row in either direction, or live
+  (`pending`/`accepted`) rows in **both** directions. Check it with
+  `select public.mutual_interest_exists('uuid-a', 'uuid-b')` or reveal the
+  gated number with `select public.get_profile_contact('target-uuid')`
+  (returns `NULL` unless paid + mutual).
+
+`/brides` lists every `active` profile with `gender = 'female'`; `/grooms`
+lists every `active` profile with `gender = 'male'` (gender is set in the
+profile wizard). `/search` keeps the combined view with a Bride/Groom filter.
+
+`/profile/edit` resumes where the member left off: completed wizard steps are
+remembered per user (localStorage) and the first incomplete section opens
+automatically; the stepper is clickable so any section can be revisited. The
+fallback (no stored progress, e.g. a new device) infers the resume point from
+the saved data — Basic → Education → About — and a fully-published profile
+opens at Basic for review.
 
 ## Useful admin queries (matchmaking)
 

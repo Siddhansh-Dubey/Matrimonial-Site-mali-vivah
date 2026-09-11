@@ -6,20 +6,26 @@ import { isSupabaseConfigured } from '@/lib/env'
 import { BrowseGrid } from '@/components/profile/browse-grid'
 import { hasActiveSubscription } from '@/lib/profile/subscription'
 import { AGE_OPTIONS, cityOptions, subCommunityOptions } from '@/lib/profile/profile-schema'
-import type { Gender, MatchCard as MatchCardType } from '@/lib/supabase/database.types'
+import type { MatchCard as MatchCardType } from '@/lib/supabase/database.types'
 
-export const metadata: Metadata = { title: 'Search profiles' }
+export const metadata: Metadata = {
+  title: 'Brides',
+  description: 'Browse verified Mali Samaj bride profiles.',
+}
 export const dynamic = 'force-dynamic'
 
 type Params = {
-  lookingFor?: string
   ageFrom?: string
   ageTo?: string
   location?: string
   subCommunity?: string
 }
 
-export default async function SearchPage({ searchParams }: { searchParams?: Params }) {
+/**
+ * Brides page — every ACTIVE profile whose gender is `female`.
+ * Gender comes from the profile wizard (matrimony_profiles.gender).
+ */
+export default async function BridesPage({ searchParams }: { searchParams?: Params }) {
   if (!isSupabaseConfigured) redirect('/login')
   const supabase = createClient()
   const {
@@ -27,8 +33,6 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const lookingFor =
-    searchParams?.lookingFor === 'groom' ? 'male' : searchParams?.lookingFor === 'bride' ? 'female' : null
   const minAge = parseNum(searchParams?.ageFrom)
   const maxAge = parseNum(searchParams?.ageTo)
   const city = searchParams?.location
@@ -36,7 +40,7 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
 
   const [{ data, error }, isPaid] = await Promise.all([
     supabase.rpc('search_matches', {
-      p_looking_for: (lookingFor as Gender | null) ?? null,
+      p_looking_for: 'female',
       p_min_age: minAge,
       p_max_age: maxAge,
       p_city: city || null,
@@ -46,7 +50,9 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
     hasActiveSubscription(supabase, user.id),
   ])
 
-  const matches = (data ?? []) as MatchCardType[]
+  // Defensive: the RPC already filters by gender, but never show a groom here
+  // even if an older RPC version ignored the filter.
+  const matches = ((data ?? []) as MatchCardType[]).filter((m) => m.gender !== 'male')
 
   return (
     <section className="bg-cream">
@@ -56,42 +62,19 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
             Browse profiles
           </p>
           <h1 className="mt-3 font-display text-4xl font-bold text-maroon sm:text-5xl">
-            {lookingFor === 'male'
-              ? 'Find a groom'
-              : lookingFor === 'female'
-                ? 'Find a bride'
-                : 'Find your match'}
+            Find a bride
           </h1>
           <p className="mt-3 text-sm text-stone-600 sm:text-base">
-            Verified Mali Samaj profiles, contact details kept private.
+            Verified Mali Samaj bride profiles, contact details kept private.
           </p>
         </div>
 
-        {/* filter band */}
         <form
-          action="/search"
+          action="/brides"
           method="get"
           className="mx-auto mt-8 max-w-5xl rounded-[28px] bg-maroon-deep px-6 py-6 shadow-2xl shadow-maroon/30 sm:px-8"
         >
-          <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-[1fr_0.8fr_0.8fr_1fr_1fr_auto] lg:items-end">
-            <Field label="Looking for">
-              <div className="flex gap-2">
-                {(['bride', 'groom'] as const).map((v) => (
-                  <label key={v} className="cursor-pointer">
-                    <input
-                      type="radio"
-                      name="lookingFor"
-                      value={v}
-                      defaultChecked={lookingFor === (v === 'groom' ? 'male' : 'female')}
-                      className="peer sr-only"
-                    />
-                    <span className="inline-flex items-center justify-center rounded-full border border-white/35 px-4 py-2 text-sm font-semibold text-white transition-colors peer-checked:border-white peer-checked:bg-white peer-checked:text-maroon-deep peer-hover:bg-white/10">
-                      {v === 'bride' ? 'Bride' : 'Groom'}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </Field>
+          <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-[0.8fr_0.8fr_1fr_1fr_auto] lg:items-end">
             <Field label="Age from">
               <Select name="ageFrom" options={AGE_OPTIONS.map(String)} defaultValue={searchParams?.ageFrom} />
             </Field>
@@ -122,14 +105,13 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
           </div>
         </form>
 
-        {/* results */}
         {error && (
           <p className="mt-10 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-800">
-            Could not load matches: {error.message}
+            Could not load profiles: {error.message}
           </p>
         )}
 
-        {!error && <BrowseGrid matches={matches} isPaid={isPaid} clearHref="/search" />}
+        {!error && <BrowseGrid matches={matches} isPaid={isPaid} clearHref="/brides" />}
       </div>
     </section>
   )

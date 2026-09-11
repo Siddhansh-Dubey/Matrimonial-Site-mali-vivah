@@ -54,6 +54,73 @@ type Step = (typeof STEPS)[number]
 
 type Errors = Record<string, string | undefined>
 
+/* ------------------------- resume-where-you-left ------------------------- */
+
+type WizardProgress = { completed: Step[]; lastStep: Step }
+
+function progressKey(userId: string): string {
+  return `mv-wizard-progress-${userId}`
+}
+
+function loadProgress(userId: string): WizardProgress | null {
+  try {
+    const raw = window.localStorage.getItem(progressKey(userId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as WizardProgress
+    if (!parsed || !Array.isArray(parsed.completed)) return null
+    const completed = parsed.completed.filter((s): s is Step =>
+      (STEPS as readonly string[]).includes(s)
+    )
+    const lastStep = (STEPS as readonly string[]).includes(parsed.lastStep)
+      ? parsed.lastStep
+      : 'basic'
+    return { completed, lastStep }
+  } catch {
+    return null
+  }
+}
+
+function saveProgress(userId: string, progress: WizardProgress): void {
+  try {
+    window.localStorage.setItem(progressKey(userId), JSON.stringify(progress))
+  } catch {
+    // storage unavailable (private mode) — resume simply falls back to data inference
+  }
+}
+
+function basicIncomplete(profile: MatrimonyProfile | null): boolean {
+  if (!profile) return true
+  return !profile.gender || !profile.date_of_birth || !profile.city
+}
+
+function educationIncomplete(profile: MatrimonyProfile | null): boolean {
+  if (!profile) return true
+  return !profile.education || !profile.occupation
+}
+
+/**
+ * First step the user still needs to complete.
+ * 1. Stored progress (steps already clicked through) wins — resume at the first
+ *    step NOT in `completed`.
+ * 2. Otherwise infer from the saved data: basic → education → about → photos.
+ * 3. A fully-completed / published profile resumes at `basic` so every section
+ *    can be reviewed and edited.
+ */
+function getResumeStep(
+  profile: MatrimonyProfile | null,
+  stored: WizardProgress | null
+): Step {
+  if (stored && stored.completed.length > 0) {
+    const next = STEPS.find((s) => !stored.completed.includes(s))
+    // All steps done before → start at the beginning for editing.
+    return next ?? 'basic'
+  }
+  if (basicIncomplete(profile)) return 'basic'
+  if (educationIncomplete(profile)) return 'education'
+  if (profile?.status === 'active') return 'basic'
+  return 'about'
+}
+
 function label(option: string): string {
   return option
     .replace(/_/g, ' ')
@@ -74,6 +141,8 @@ export function ProfileWizard() {
   const [errors, setErrors] = useState<Errors>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [resumed, setResumed] = useState(false)
+  const [completedSteps, setCompletedSteps] = useState<Step[]>([])
 
   // personal
   const [gender, setGender] = useState<Gender>('male')
@@ -181,6 +250,13 @@ export function ProfileWizard() {
           setPreferredMaritalStatus(prefRow.preferred_marital_status ?? 'never_married')
           setPrefNote(prefRow.note ?? '')
         }
+
+        // ---- resume where the user left off ----
+        const stored = loadProgress(uid)
+        if (stored) setCompletedSteps(stored.completed)
+        const resume = getResumeStep(profile, stored)
+        setStep(resume)
+        if (resume !== 'basic') setResumed(true)
       }
       setReady(true)
     }
@@ -322,6 +398,16 @@ export function ProfileWizard() {
     return Object.keys(next).length === 0
   }
 
+  function persistProgress(nextCompleted: Step[], lastStep: Step) {
+    setCompletedSteps(nextCompleted)
+    if (userId) saveProgress(userId, { completed: nextCompleted, lastStep })
+  }
+
+  function markComplete(s: Step): Step[] {
+    const next = completedSteps.includes(s) ? completedSteps : [...completedSteps, s]
+    return next
+  }
+
   async function goNext() {
     setFormError(null)
     if (!validateStep(step)) return
@@ -331,18 +417,51 @@ export function ProfileWizard() {
     setSaving(false)
     if (!ok) return
     const idx = STEPS.indexOf(step)
-    if (idx < STEPS.length - 1) setStep(STEPS[idx + 1])
+    if (idx < STEPS.length - 1) {
+      const nextStep = STEPS[idx + 1]
+      persistProgress(markComplete(step), nextStep)
+      setStep(nextStep)
+    }
   }
 
   async function goBack() {
     setFormError(null)
     const idx = STEPS.indexOf(step)
-    if (idx > 0) setStep(STEPS[idx - 1])
+    if (idx > 0) {
+      const prev = STEPS[idx - 1]
+      persistProgress(completedSteps, prev)
+      setStep(prev)
+    }
+  }
+
+  /** Jump via the stepper — saves the current draft first so nothing is lost. */
+  async function jumpTo(target: Step) {
+    if (target === step || saving) return
+    setFormError(null)
+    setSaving(true)
+    const ok = await saveProfile(false)
+    setSaving(false)
+    if (!ok) return
+    persistProgress(completedSteps, target)
+    setErrors({})
+    setStep(target)
   }
 
   async function onPublish(e: FormEvent) {
     e.preventDefault()
     setFormError(null)
+    // A publish must satisfy EVERY required section, not just preferences —
+    // otherwise incomplete profiles would go live on Brides/Grooms pages.
+    if (!validateStep('basic')) {
+      setStep('basic')
+      setFormError('Please complete the Basic details section before publishing.')
+      return
+    }
+    if (!validateStep('education')) {
+      setStep('education')
+      setFormError('Please complete the Education & career section before publishing.')
+      return
+    }
     if (!validateStep('preferences')) {
       setStep('preferences')
       return
@@ -351,6 +470,7 @@ export function ProfileWizard() {
     const ok = await saveProfile(true)
     setSaving(false)
     if (ok) {
+      if (userId) saveProgress(userId, { completed: [...STEPS], lastStep: 'photos' })
       router.push('/profile?published=1')
       router.refresh()
     }
@@ -461,26 +581,38 @@ export function ProfileWizard() {
           <p className="mt-3 text-sm text-stone-600 sm:text-base">{t('profile.subtitle')}</p>
         </div>
 
-        {/* stepper */}
+        {resumed && (
+          <p className="mx-auto mt-6 max-w-2xl rounded-2xl border border-gold-400/50 bg-gold-100/60 px-5 py-3 text-center text-[13px] font-medium text-maroon-deep">
+            Welcome back — we&apos;ve resumed where you left off (
+            {t(`profile.step.${step}.label`)}). Use the steps below to jump anywhere.
+          </p>
+        )}
+
+        {/* stepper — clickable so any section can be revisited while editing */}
         <ol className="mx-auto mt-9 flex max-w-3xl items-center justify-between">
           {STEPS.map((s, i) => {
-            const done = i < stepIndex
+            const done = i < stepIndex || completedSteps.includes(s)
             const active = i === stepIndex
             const { icon: Icon } = stepTitles[s]
             return (
               <li key={s} className="flex flex-1 items-center">
-                <div className="flex flex-col items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => jumpTo(s)}
+                  title={t(`profile.step.${s}.title`)}
+                  className="flex flex-col items-center gap-1.5 rounded-xl px-1 py-1 outline-none transition-transform hover:scale-[1.04] focus-visible:ring-2 focus-visible:ring-brand-500"
+                >
                   <span
                     className={[
                       'grid h-10 w-10 place-items-center rounded-full ring-1 transition-colors',
-                      done
+                      done && !active
                         ? 'bg-gold-400 text-maroon-deep ring-gold-500'
                         : active
                           ? 'bg-maroon text-white ring-maroon'
                           : 'bg-white text-stone-400 ring-stone-200',
                     ].join(' ')}
                   >
-                    {done ? <Check className="h-5 w-5" /> : <Icon className="h-4 w-4" />}
+                    {done && !active ? <Check className="h-5 w-5" /> : <Icon className="h-4 w-4" />}
                   </span>
                   <span
                     className={[
@@ -490,7 +622,7 @@ export function ProfileWizard() {
                   >
                     {t(`profile.step.${s}.label`)}
                   </span>
-                </div>
+                </button>
                 {i < STEPS.length - 1 && (
                   <span
                     className={['mx-2 mb-5 h-px flex-1 sm:mb-6', done ? 'bg-gold-500' : 'bg-stone-200'].join(' ')}
