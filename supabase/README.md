@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Six migrations, run in filename order:
+Ten migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -27,6 +27,32 @@ Six migrations, run in filename order:
 6. `20260912130000_public_profile_browse.sql` — lets anonymous visitors see a
    safe five-profile preview on Brides and Grooms, and includes a member's own
    published profile in the gender-specific browse results.
+
+Migrations 7–10 are the **Phase 1 completion pass** (database foundation):
+
+7. `20260915000000_enum_extensions.sql` — adds `suspended` / `expired` to
+   `profile_status` and creates the Phase 1 enums (`photo_kind`,
+   `notification_type`, `payment_status`, `membership_tier`, …). This is its own
+   file on purpose: PostgreSQL forbids *using* an enum value in the same
+   transaction that creates it, and the SQL Editor runs a file as one
+   transaction. **Do not merge it into another file.**
+8. `20260915010000_profile_model_family_photo.sql` — `communities` /
+   `sub_communities` hierarchy, the missing PRD profile fields (native place,
+   company, lifestyle, the whole family block, privacy settings, WhatsApp
+   consent), `profile_photos.kind`, and the `enforce_publishable_profile()`
+   trigger that makes the **family photo mandatory server-side**.
+9. `20260915020000_packages_pricing.sql` — the authoritative price list
+   (Smart ₹999 / Premium ₹2,499 / VIP ₹4,999), the `tier` + `benefits` columns,
+   and the `get_membership()` / `has_benefit()` resolvers every gate uses.
+10. `20260915030000_notifications.sql` — the `notifications` table behind the
+    navbar bell, with column-level grants so a member can flip `is_read` but
+    can never insert a notification or rewrite its title.
+
+> ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
+> makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's
+> family-photo step has shipped, otherwise members cannot publish at all — the
+> trigger will raise `PROFILE_INCOMPLETE: family photo` with no way to satisfy
+> it from the UI.
 
 ## What the scan found
 
