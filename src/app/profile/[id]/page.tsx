@@ -3,13 +3,16 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import {
   ArrowLeft,
+  BadgeCheck,
   Briefcase,
+  Download,
   GraduationCap,
   Heart,
   Lock,
   MapPin,
   Phone,
   User as UserIcon,
+  Users,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
@@ -141,13 +144,33 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                 ))}
               </div>
             )}
+
+            {/* family photo — paid viewers only (the RPC returns null otherwise) */}
+            {canSeeDetails && profile.family_photo && (
+              <div className="mt-4">
+                <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-stone-500">
+                  <Users className="h-3.5 w-3.5" /> Family photo
+                </p>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={photoUrl(profile.family_photo) ?? ''}
+                  alt="Family photograph"
+                  className="w-full rounded-2xl object-cover ring-1 ring-stone-200"
+                />
+              </div>
+            )}
           </div>
 
           {/* details */}
           <div className="card h-fit p-6 sm:p-8">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <h1 className="font-display text-3xl font-bold text-maroon">{displayName}</h1>
+                <h1 className="flex items-center gap-2 font-display text-3xl font-bold text-maroon">
+                  <span className="truncate">{displayName}</span>
+                  {profile.verified && (
+                    <BadgeCheck className="h-6 w-6 shrink-0 text-emerald-600" aria-label="Verified profile" />
+                  )}
+                </h1>
                 {canSeeDetails ? (
                   <p className="mt-1 text-sm text-stone-600">
                     {profile.age != null ? `${profile.age} years` : ''}
@@ -171,17 +194,23 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                   label="Location"
                   value={[profile.city, profile.state].filter(Boolean).join(', ') || '—'}
                 />
+                {profile.native_place && (
+                  <Item icon={MapPin} label="Native place" value={profile.native_place} />
+                )}
                 <Item icon={GraduationCap} label="Education" value={profile.education ?? '—'} />
                 {profile.education_details && (
                   <Item icon={GraduationCap} label="Details" value={profile.education_details} />
                 )}
                 <Item icon={Briefcase} label="Occupation" value={profile.occupation ?? '—'} />
+                {profile.company && <Item icon={Briefcase} label="Company" value={profile.company} />}
                 {profile.annual_income && (
                   <Item icon={Briefcase} label="Annual income" value={profile.annual_income} />
                 )}
-                <Item icon={Heart} label="Marital status" value={label(profile.marital_status)} />
-                <Item icon={UserIcon} label="Diet" value={label(profile.diet)} />
-                <Item icon={UserIcon} label="Mother tongue" value={profile.mother_tongue} />
+                <Item icon={Briefcase} label="Smoking" value={label(profile.smoking ?? 'never')} />
+                <Item icon={Briefcase} label="Drinking" value={label(profile.drinking ?? 'never')} />
+                <Item icon={Heart} label="Marital status" value={label(profile.marital_status ?? 'never_married')} />
+                <Item icon={UserIcon} label="Diet" value={label(profile.diet ?? 'vegetarian')} />
+                <Item icon={UserIcon} label="Mother tongue" value={profile.mother_tongue ?? 'Marathi'} />
                 {profile.gotra && <Item icon={UserIcon} label="Gotra" value={profile.gotra} />}
               </dl>
             ) : (
@@ -233,6 +262,31 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
               </div>
             )}
 
+            {/* family section — paid viewers, honoring member privacy settings */}
+            {canSeeDetails &&
+              (profile.father_occupation ||
+                profile.mother_occupation ||
+                profile.siblings ||
+                profile.family_type ||
+                profile.family_location ||
+                profile.family_details) && (
+                <div className="mt-6">
+                  <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-stone-500">
+                    <Users className="h-3.5 w-3.5" /> Family
+                  </p>
+                  <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+                    {profile.father_occupation && <Row label="Father" value={profile.father_occupation} />}
+                    {profile.mother_occupation && <Row label="Mother" value={profile.mother_occupation} />}
+                    {profile.siblings && <Row label="Siblings" value={profile.siblings} />}
+                    {profile.family_type && <Row label="Family type" value={label(profile.family_type)} />}
+                    {profile.family_location && <Row label="Family lives in" value={profile.family_location} />}
+                  </dl>
+                  {profile.family_details && (
+                    <p className="mt-2 whitespace-pre-line text-sm text-stone-600">{profile.family_details}</p>
+                  )}
+                </div>
+              )}
+
             {/* phone — paid + mutual only */}
             <div className="mt-6 rounded-2xl border border-stone-200 bg-stone-50 px-4 py-3.5">
               <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-stone-500">
@@ -261,6 +315,16 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                     : 'Visible because interest is mutual.'}
               </p>
             </div>
+
+            {/* biodata PDF — same gate as the phone number: paid + mutual interest */}
+            {canSeePhone && (
+              <a
+                href={`/api/biodata/${profile.id}`}
+                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-maroon px-4 py-3 text-sm font-bold text-white shadow-lg shadow-maroon/20 hover:bg-maroon-dark"
+              >
+                <Download className="h-4 w-4" /> Download biodata (PDF)
+              </a>
+            )}
 
             <div className="mt-7 border-t border-stone-100 pt-6">
               {user ? (
@@ -345,4 +409,13 @@ function LockedItem({ icon: Icon, label, fake }: { icon: typeof Heart; label: st
 
 function label(v: string): string {
   return v.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function Row({ label: lbl, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-[11px] uppercase tracking-wide text-stone-400">{lbl}</dt>
+      <dd className="font-medium text-stone-800">{value}</dd>
+    </div>
+  )
 }

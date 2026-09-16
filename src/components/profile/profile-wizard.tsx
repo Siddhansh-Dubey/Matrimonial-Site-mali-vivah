@@ -181,10 +181,12 @@ export function ProfileWizard() {
   const [preferredMaritalStatus, setPreferredMaritalStatus] = useState<MaritalStatus>('never_married')
   const [prefNote, setPrefNote] = useState('')
 
-  // photos
+  // photos — profile photos and (separately) the ONE family photo. The
+  // publish gate requires both blocks before a profile can go live.
   const [photos, setPhotos] = useState<{ id: number; path: string; primary: boolean }[]>([])
+  const [familyPhoto, setFamilyPhoto] = useState<{ id: number; path: string } | null>(null)
   const [primaryPath, setPrimaryPath] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
+  const [uploading, setUploading] = useState<'profile_photo' | 'family_photo' | null>(null)
 
   // ---- load existing profile ----
   useEffect(() => {
@@ -213,8 +215,13 @@ export function ProfileWizard() {
         const prefRow = pp.data as PartnerPreferences | null
         setPrefs(prefRow)
         const photoRows = ph.data ?? []
-        setPhotos(photoRows.map((p) => ({ id: p.id, path: p.storage_path, primary: p.is_primary })))
-        const prim = photoRows.find((p) => p.is_primary)?.storage_path ?? photoRows[0]?.storage_path ?? null
+        const asKind = (p: (typeof photoRows)[number]): 'profile_photo' | 'family_photo' =>
+          (p as { kind?: string }).kind === 'family_photo' ? 'family_photo' : 'profile_photo'
+        const profileRows = photoRows.filter((p) => asKind(p) === 'profile_photo')
+        const familyRow = photoRows.find((p) => asKind(p) === 'family_photo')
+        setPhotos(profileRows.map((p) => ({ id: p.id, path: p.storage_path, primary: p.is_primary })))
+        setFamilyPhoto(familyRow ? { id: familyRow.id, path: familyRow.storage_path } : null)
+        const prim = profileRows.find((p) => p.is_primary)?.storage_path ?? profileRows[0]?.storage_path ?? null
         setPrimaryPath(prim)
 
         if (profile) {
@@ -334,7 +341,13 @@ export function ProfileWizard() {
       .from('matrimony_profiles')
       .upsert(mpPayload, { onConflict: 'user_id' })
     if (mpError) {
-      setFormError(mpError.message)
+      // The publish gate refuses an incomplete go-live; show exactly what is
+      // missing so the member can fix it instead of guessing.
+      setFormError(
+        mpError.message.startsWith('PROFILE_INCOMPLETE')
+          ? mpError.message.replace(/^PROFILE_INCOMPLETE: ?/, 'Complete your profile before publishing: ')
+          : mpError.message
+      )
       return false
     }
     const { error: ppError } = await supabase
@@ -466,6 +479,14 @@ export function ProfileWizard() {
       setStep('preferences')
       return
     }
+    if (photos.length === 0) {
+      setFormError('Add at least one profile photo before publishing — add it below, then publish again.')
+      return
+    }
+    if (!familyPhoto) {
+      setFormError('Add your family photo before publishing — add it below in the family photo block, then publish again.')
+      return
+    }
     setSaving(true)
     const ok = await saveProfile(true)
     setSaving(false)
@@ -477,14 +498,15 @@ export function ProfileWizard() {
   }
 
   // ---- photo upload ----
-  async function onUpload(file: File) {
+  async function onUpload(file: File, kind: 'profile_photo' | 'family_photo' = 'profile_photo') {
     if (!userId || !isSupabaseConfigured) return
     setFormError(null)
-    setUploading(true)
+    setUploading(kind)
     try {
       const supabase = createClient()
       const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')
-      const path = `${userId}/${Date.now()}-${safeName}`
+      const folder = kind === 'family_photo' ? `${userId}/family` : userId
+      const path = `${folder}/${Date.now()}-${safeName}`
       const { error } = await supabase.storage.from('profile-photos').upload(path, file, { upsert: false })
       if (error) {
         // Storage enforces its own RLS on storage.objects (independent of the
@@ -496,22 +518,53 @@ export function ProfileWizard() {
         setFormError(`[photo] ${error.message}${hint}`)
         return
       }
-      const isFirst = photos.length === 0
-      const { data, error: insertError } = await supabase
-        .from('profile_photos')
-        .insert({ profile_id: userId, storage_path: path, is_primary: isFirst, sort_order: photos.length })
-        .select()
-        .single()
-      if (insertError) {
-        // Don't leave an orphaned object in Storage when the DB row failed.
-        await supabase.storage.from('profile-photos').remove([path])
-        setFormError(`[photo] ${insertError.message}`)
-        return
+      if (kind === 'family_photo') {
+        // Exactly one family photo: replace the old row/object. (The DB keeps
+        // one family row per profile via a partial unique index, so we delete
+        // the old row first — ON CONFLICT cannot target partial indexes.)
+        const old = familyPhoto
+        if (old) {
+          const { error: delError } = await supabase
+            .from('profile_photos')
+            .delete()
+            .eq('profile_id', userId)
+            .eq('kind', 'family_photo')
+          if (delError) {
+            await supabase.storage.from('profile-photos').remove([path])
+            setFormError(`[photo] ${delError.message}`)
+            return
+          }
+        }
+        const { data, error: insertError } = await supabase
+          .from('profile_photos')
+          .insert({ profile_id: userId, storage_path: path, is_primary: false, sort_order: 999, kind: 'family_photo' })
+          .select()
+          .single()
+        if (insertError) {
+          await supabase.storage.from('profile-photos').remove([path])
+          setFormError(`[photo] ${insertError.message}`)
+          return
+        }
+        setFamilyPhoto({ id: data.id, path: data.storage_path })
+        if (old) await supabase.storage.from('profile-photos').remove([old.path])
+      } else {
+        const isFirst = photos.length === 0
+        const { data, error: insertError } = await supabase
+          .from('profile_photos')
+          .insert({ profile_id: userId, storage_path: path, is_primary: isFirst, sort_order: photos.length })
+          .select()
+          .single()
+        if (insertError) {
+          // Don't leave an orphaned object in Storage when the DB row failed.
+          await supabase.storage.from('profile-photos').remove([path])
+          setFormError(`[photo] ${insertError.message}`)
+          return
+        }
+        setPhotos((prev) => [...prev, { id: data.id, path: data.storage_path, primary: data.is_primary }])
+        if (isFirst) setPrimaryPath(data.storage_path)
       }
-      setPhotos((prev) => [...prev, { id: data.id, path: data.storage_path, primary: data.is_primary }])
-      if (isFirst) setPrimaryPath(data.storage_path)
     } finally {
-      setUploading(false)
+      setUploading(null)
     }
   }
 
@@ -529,6 +582,10 @@ export function ProfileWizard() {
     const supabase = createClient()
     await supabase.from('profile_photos').delete().eq('id', p.id)
     await supabase.storage.from('profile-photos').remove([p.path])
+    if (familyPhoto && p.id === familyPhoto.id) {
+      setFamilyPhoto(null)
+      return
+    }
     const remaining = photos.filter((x) => x.id !== p.id)
     setPhotos(remaining)
     if (p.primary) {
@@ -862,7 +919,7 @@ export function ProfileWizard() {
                   </div>
                 ))}
                 <label className="flex aspect-square cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-stone-300 text-stone-400 hover:border-brand-400 hover:text-brand-600">
-                  {uploading ? <Loader2 className="h-6 w-6 animate-spin" /> : <ImagePlus className="h-6 w-6" />}
+                  {uploading === 'profile_photo' ? <Loader2 className="h-6 w-6 animate-spin" /> : <ImagePlus className="h-6 w-6" />}
                   <span className="px-3 text-center text-[11px] font-medium">{t('profile.photos.add')}</span>
                   <input
                     type="file"
@@ -870,12 +927,60 @@ export function ProfileWizard() {
                     className="sr-only"
                     onChange={(e) => {
                       const f = e.target.files?.[0]
-                      if (f) onUpload(f)
+                      if (f) onUpload(f, 'profile_photo')
                       e.target.value = ''
                     }}
                   />
                 </label>
               </div>
+
+              {/* Family photo — mandatory before publishing. It is stored as a
+                  separate kind and shown to matched members with the biodata. */}
+              <div className="rounded-2xl border border-gold-300/60 bg-gold-50/60 p-4">
+                <p className="text-sm font-bold text-stone-900">
+                  {t('profile.familyPhoto.title')}{' '}
+                  <span className="text-brand-700" aria-hidden>*</span>
+                  <span className="ml-2 rounded-full bg-brand-100 px-2 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-brand-800">
+                    {t('profile.familyPhoto.required')}
+                  </span>
+                </p>
+                <p className="mt-1 text-xs text-stone-500">{t('profile.familyPhoto.hint')}</p>
+                <div className="mt-3 flex items-start gap-3">
+                  {familyPhoto ? (
+                    <div className="relative overflow-hidden rounded-xl ring-1 ring-stone-200">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={photoUrl(familyPhoto.path) ?? ''} alt="" className="h-28 w-28 object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => onRemovePhoto({ id: familyPhoto.id, path: familyPhoto.path, primary: false })}
+                        className="absolute right-1 top-1 rounded bg-white/90 px-1.5 py-0.5 text-[11px] font-semibold text-brand-700"
+                        aria-label="Remove family photo"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex h-28 w-28 items-center justify-center rounded-xl bg-gold-100 text-[11px] font-medium text-gold-700">
+                      {t('profile.familyPhoto.none')}
+                    </div>
+                  )}
+                  <label className="inline-flex cursor-pointer items-center gap-2 self-center rounded-full bg-maroon px-4 py-2 text-xs font-bold text-white hover:bg-maroon-dark">
+                    {uploading === 'family_photo' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+                    {familyPhoto ? t('profile.familyPhoto.replace') : t('profile.familyPhoto.add')}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="sr-only"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) onUpload(f, 'family_photo')
+                        e.target.value = ''
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+
               <div className="rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-800">{t('profile.photos.reviewNote')}</div>
             </div>
           )}

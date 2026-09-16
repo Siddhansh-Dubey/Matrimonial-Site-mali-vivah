@@ -142,12 +142,7 @@ export default async function InterestsPage() {
                           View profile
                         </Link>
                       </div>
-                      <InterestActions
-                        interestId={i.id}
-                        current={i.status}
-                        senderId={i.sender_id}
-                        isMutual={mutual}
-                      />
+                      <InterestActions interestId={i.id} current={i.status} isMutual={mutual} />
                     </li>
                   )
                 })}

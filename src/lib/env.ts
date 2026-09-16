@@ -20,3 +20,8 @@ export function requireServiceRoleKey(): string {
   if (!key) throw new Error('SUPABASE_SERVICE_ROLE_KEY is not set')
   return key
 }
+
+/** Razorpay server-side credentials (see src/lib/payments/razorpay.ts). */
+export function isRazorpayConfigured(): boolean {
+  return Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)
+}

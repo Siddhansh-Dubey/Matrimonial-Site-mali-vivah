@@ -1,12 +1,22 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { CalendarDays, ChevronDown, MapPin, Search } from 'lucide-react'
+import { CalendarDays, ChevronDown, Crown, MapPin, Search, SlidersHorizontal } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
 import { BrowseGrid } from '@/components/profile/browse-grid'
 import { hasActiveSubscription } from '@/lib/profile/subscription'
-import { AGE_OPTIONS, cityOptions, subCommunityOptions } from '@/lib/profile/profile-schema'
-import type { Gender, MatchCard as MatchCardType } from '@/lib/supabase/database.types'
+import {
+  AGE_OPTIONS,
+  cityOptions,
+  dietOptions,
+  educationOptions,
+  incomeOptions,
+  maritalStatusOptions,
+  occupationOptions,
+  subCommunityOptions,
+} from '@/lib/profile/profile-schema'
+import type { Diet, Gender, MaritalStatus, MatchCard as MatchCardType } from '@/lib/supabase/database.types'
 
 export const metadata: Metadata = { title: 'Search profiles' }
 export const dynamic = 'force-dynamic'
@@ -17,6 +27,16 @@ type Params = {
   ageTo?: string
   location?: string
   subCommunity?: string
+  // advanced (server gated — inert unless the plan includes advanced_search)
+  education?: string
+  occupation?: string
+  nativePlace?: string
+  maritalStatus?: string
+  diet?: string
+  minIncome?: string
+  minHeight?: string
+  maxHeight?: string
+  advanced?: string
 }
 
 export default async function SearchPage({ searchParams }: { searchParams?: Params }) {
@@ -27,6 +47,13 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const [advRes, sub] = await Promise.all([
+    supabase.rpc('has_benefit', { p_key: 'advanced_search' }),
+    hasActiveSubscription(supabase, user.id),
+  ])
+  const advancedSearch = advRes.data === true
+  const isPaid = sub
+
   const lookingFor =
     searchParams?.lookingFor === 'groom' ? 'male' : searchParams?.lookingFor === 'bride' ? 'female' : null
   const minAge = parseNum(searchParams?.ageFrom)
@@ -34,19 +61,41 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
   const city = searchParams?.location
   const subCommunity = searchParams?.subCommunity
 
-  const [{ data, error }, isPaid] = await Promise.all([
-    supabase.rpc('search_matches', {
-      p_looking_for: (lookingFor as Gender | null) ?? null,
-      p_min_age: minAge,
-      p_max_age: maxAge,
-      p_city: city || null,
-      p_sub_community: subCommunity || null,
-      p_limit: 120,
-    }),
-    hasActiveSubscription(supabase, user.id),
-  ])
+  // Advanced filters — UI is only rendered for eligible plans, and the RPC
+  // ignores these for everyone else (double-gated).
+  const adv = {
+    education: searchParams?.education || null,
+    occupation: searchParams?.occupation || null,
+    nativePlace: searchParams?.nativePlace || null,
+    maritalStatus: (maritalStatusOptions as readonly string[]).includes(searchParams?.maritalStatus ?? '')
+      ? (searchParams!.maritalStatus as MaritalStatus)
+      : null,
+    diet: (dietOptions as readonly string[]).includes(searchParams?.diet ?? '')
+      ? (searchParams!.diet as Diet)
+      : null,
+    minIncome: searchParams?.minIncome || null,
+    minHeight: parseNum(searchParams?.minHeight),
+    maxHeight: parseNum(searchParams?.maxHeight),
+  }
 
-  const matches = (data ?? []) as MatchCardType[]
+  const { data, error } = await supabase.rpc('search_matches', {
+    p_looking_for: (lookingFor as Gender | null) ?? null,
+    p_min_age: minAge,
+    p_max_age: maxAge,
+    p_city: city || null,
+    p_sub_community: subCommunity || null,
+    p_limit: 120,
+    p_education: advancedSearch ? adv.education : null,
+    p_occupation: advancedSearch ? adv.occupation : null,
+    p_native_place: advancedSearch ? adv.nativePlace : null,
+    p_marital_status: advancedSearch ? adv.maritalStatus : null,
+    p_diet: advancedSearch ? adv.diet : null,
+    p_min_income: advancedSearch ? adv.minIncome : null,
+    p_min_height: advancedSearch ? adv.minHeight : null,
+    p_max_height: advancedSearch ? adv.maxHeight : null,
+  })
+
+  const matches = ((data ?? []) as MatchCardType[]) ?? []
 
   return (
     <section className="bg-cream">
@@ -120,6 +169,86 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
               <Search className="h-4 w-4" /> Search
             </button>
           </div>
+
+          {/* Advanced filters — Premium & VIP plans only. The block is visible
+              for everyone with context: paid members filter live; free members
+              see exactly what the upgrade unlocks. The server re-checks. */}
+          <details className="mt-5 border-t border-white/15 pt-4" open={searchParams?.advanced === '1'}>
+            <summary className="flex cursor-pointer items-center justify-between text-sm font-semibold text-white/80 hover:text-white">
+              <span className="inline-flex items-center gap-2">
+                <SlidersHorizontal className="h-4 w-4" /> Advanced filters
+                {!advancedSearch && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-gold-400/90 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-maroon-deep">
+                    <Crown className="h-3 w-3" /> Premium · VIP
+                  </span>
+                )}
+              </span>
+              <ChevronDown className="h-4 w-4" />
+            </summary>
+            {advancedSearch ? (
+              <div className="mt-4 grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Field label="Education">
+                  <select name="education" defaultValue={searchParams?.education ?? ''} className="w-full appearance-none rounded-full border border-white bg-white py-2.5 pl-4 pr-9 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400">
+                    <option value="">Any</option>
+                    {educationOptions.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Occupation">
+                  <select name="occupation" defaultValue={searchParams?.occupation ?? ''} className="w-full appearance-none rounded-full border border-white bg-white py-2.5 pl-4 pr-9 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400">
+                    <option value="">Any</option>
+                    {occupationOptions.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Marital status">
+                  <select name="maritalStatus" defaultValue={searchParams?.maritalStatus ?? ''} className="w-full appearance-none rounded-full border border-white bg-white py-2.5 pl-4 pr-9 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400">
+                    <option value="">Any</option>
+                    {maritalStatusOptions.map((o) => (
+                      <option key={o} value={o}>{titleCase(o)}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Diet">
+                  <select name="diet" defaultValue={searchParams?.diet ?? ''} className="w-full appearance-none rounded-full border border-white bg-white py-2.5 pl-4 pr-9 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400">
+                    <option value="">Any</option>
+                    {dietOptions.map((o) => (
+                      <option key={o} value={o}>{titleCase(o)}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Min. income">
+                  <select name="minIncome" defaultValue={searchParams?.minIncome ?? ''} className="w-full appearance-none rounded-full border border-white bg-white py-2.5 pl-4 pr-9 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400">
+                    <option value="">Any</option>
+                    {incomeOptions.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Min height (cm)">
+                  <input name="minHeight" type="number" min="120" max="220" defaultValue={searchParams?.minHeight ?? ''} placeholder="e.g. 150" className="w-full rounded-full border border-white bg-white px-4 py-2.5 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400" />
+                </Field>
+                <Field label="Max height (cm)">
+                  <input name="maxHeight" type="number" min="120" max="220" defaultValue={searchParams?.maxHeight ?? ''} placeholder="e.g. 175" className="w-full rounded-full border border-white bg-white px-4 py-2.5 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400" />
+                </Field>
+                <Field label="Native place">
+                  <input name="nativePlace" type="text" defaultValue={searchParams?.nativePlace ?? ''} placeholder="e.g. Satara" className="w-full rounded-full border border-white bg-white px-4 py-2.5 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400" />
+                </Field>
+                <input type="hidden" name="advanced" value="1" />
+              </div>
+            ) : (
+              <p className="mt-3 max-w-2xl text-sm text-white/70">
+                Filter by education, occupation, marital status, diet, income, height and native
+                place.{' '}
+                <Link href="/packages" className="font-bold text-gold-300 underline underline-offset-2">
+                  Upgrade to Premium or VIP
+                </Link>{' '}
+                to use them.
+              </p>
+            )}
+          </details>
         </form>
 
         {/* results */}
@@ -138,6 +267,10 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
 function parseNum(v?: string): number | null {
   const n = Number(v)
   return Number.isFinite(n) && n > 0 ? n : null
+}
+
+function titleCase(v: string): string {
+  return v.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

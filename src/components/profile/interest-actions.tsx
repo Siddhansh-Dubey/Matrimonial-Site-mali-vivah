@@ -14,13 +14,10 @@ import type { InterestStatus } from '@/lib/supabase/database.types'
 export function InterestActions({
   interestId,
   current,
-  senderId,
   isMutual = false,
 }: {
   interestId: number
   current: InterestStatus
-  /** The member who sent this interest (to find the reverse row). */
-  senderId?: string
   /** True when the pair already expressed interest both ways. */
   isMutual?: boolean
 }) {
@@ -29,31 +26,20 @@ export function InterestActions({
   const [mutual, setMutual] = useState(isMutual || current === 'accepted')
   const [loading, setLoading] = useState(false)
 
+  /**
+   * Accept or decline a RECEIVED interest. The receiver row-update policy
+   * allows exactly these transitions; the database trigger notifies the
+   * sender. A single `accepted` row already counts as mutual interest, so
+   * there is nothing more to converge client-side — reverse convergence is
+   * server-side in express_interest() (the only write path for senders).
+   */
   async function respond(next: InterestStatus) {
     setLoading(true)
     const supabase = createClient()
     const { error } = await supabase.from('interests').update({ status: next }).eq('id', interestId)
     if (!error) {
       setStatus(next)
-      if (next === 'accepted') {
-        setMutual(true)
-        // Converge a reverse pending row (you had also expressed interest) so
-        // both directions read `accepted` — an explicit mutual match.
-        try {
-          const { data: userData } = await supabase.auth.getUser()
-          const uid = userData.user?.id
-          if (uid && senderId) {
-            await supabase
-              .from('interests')
-              .update({ status: 'accepted' })
-              .eq('sender_id', uid)
-              .eq('receiver_id', senderId)
-              .eq('status', 'pending')
-          }
-        } catch {
-          // non-fatal — single accepted row already counts as mutual
-        }
-      }
+      if (next === 'accepted') setMutual(true)
       router.refresh()
     }
     setLoading(false)

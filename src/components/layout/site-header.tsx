@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react'
 import { ArrowRight, LogOut, Menu, UserRound, X } from 'lucide-react'
 import { useI18n } from '@/lib/i18n/provider'
 import { LanguageToggle } from '@/components/ui/language-toggle'
+import { NotificationBell } from '@/components/layout/notification-bell'
 import { isSupabaseConfigured } from '@/lib/env'
 
 const NAV = [
@@ -129,6 +130,7 @@ export function SiteHeader() {
 
         <div className="hidden items-center gap-3 lg:flex">
           <LanguageToggle />
+          {userId && <NotificationBell userId={userId} />}
           {userId ? (
             <>
               <Link
@@ -184,7 +186,10 @@ export function SiteHeader() {
               </Link>
             ))}
             <div className="mt-3 flex flex-col gap-2.5 border-t border-stone-200/70 pt-4">
-              <LanguageToggle />
+              <div className="flex items-center justify-between">
+                <LanguageToggle />
+                {userId && <NotificationBell userId={userId} />}
+              </div>
               {userId ? (
                 <>
                   <Link
