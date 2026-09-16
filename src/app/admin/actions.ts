@@ -1,0 +1,371 @@
+'use server'
+
+/**
+ * Privileged admin operations. Every action:
+ *   1. re-verifies the caller is an admin (requireAdminAction),
+ *   2. performs the write with the service-role client (RLS-bypass is ONLY
+ *      here, never client-side),
+ *   3. appends an admin_audit_log row.
+ * Client components/users can never reach these — they are server-only.
+ */
+import { revalidatePath } from 'next/cache'
+import { audit, requireAdminAction } from '@/lib/admin/server'
+import type { Json } from '@/lib/supabase/database.types'
+
+function str(fd: FormData, key: string): string {
+  const v = fd.get(key)
+  return typeof v === 'string' ? v.trim() : ''
+}
+
+// ---------------------------------------------------------------------------
+// Members & profiles
+// ---------------------------------------------------------------------------
+
+/** Suspend or unsuspend a member's profile (blocks discovery + contact). */
+export async function setProfileSuspended(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = str(formData, 'user_id')
+  const suspend = str(formData, 'suspend') === 'true'
+  const { admin } = ctx
+  const status = suspend ? 'suspended' : 'active'
+  const { error } = await admin
+    .from('matrimony_profiles')
+    .update({ status })
+    .eq('user_id', targetUserId)
+  if (error) throw new Error(error.message)
+  await audit(ctx, suspend ? 'profile_suspend' : 'profile_unsuspend', 'profile', targetUserId)
+  revalidatePath('/admin/members')
+  revalidatePath('/admin')
+}
+
+/** Toggle the verified badge directly (usually goes through the queue). */
+export async function setProfileVerified(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = str(formData, 'user_id')
+  const verify = str(formData, 'verify') === 'true'
+  const { admin } = ctx
+  const { error } = await admin
+    .from('matrimony_profiles')
+    .update({ verified_at: verify ? new Date().toISOString() : null })
+    .eq('user_id', targetUserId)
+  if (error) throw new Error(error.message)
+  await admin.rpc('push_notification', {
+    p_user_id: targetUserId,
+    p_type: verify ? 'profile_verified' : 'admin_message',
+    p_title: verify ? 'Profile verified' : 'Verification removed',
+    p_message: verify
+      ? 'Your verified badge is live. Thank you for helping keep Mali Vivah safe.'
+      : 'An admin removed the verified badge from your profile. Reply to this message if you believe this is a mistake.',
+    p_metadata: {},
+    p_link: '/profile',
+  }).then(() => undefined, () => undefined)
+  await audit(ctx, verify ? 'verify_badge_grant' : 'verify_badge_revoke', 'profile', targetUserId)
+  revalidatePath('/admin/members')
+}
+
+/** Feature (homepage) or un-feature a profile. */
+export async function setFeatured(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = str(formData, 'user_id')
+  const feature = str(formData, 'feature') === 'true'
+  const position = Number(str(formData, 'position') || '0')
+  const { admin } = ctx
+  if (feature) {
+    const { error } = await admin
+      .from('featured_profiles')
+      .upsert({ profile_id: targetUserId, position, created_by: ctx.userId })
+    if (error) throw new Error(error.message)
+  } else {
+    await admin.from('featured_profiles').delete().eq('profile_id', targetUserId)
+  }
+  await audit(ctx, feature ? 'feature_profile' : 'unfeature_profile', 'profile', targetUserId, {
+    position,
+  })
+  revalidatePath('/admin/members')
+  revalidatePath('/admin/featured')
+}
+
+// ---------------------------------------------------------------------------
+// Verification queue
+// ---------------------------------------------------------------------------
+
+export async function decideVerification(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const requestId = str(formData, 'request_id')
+  const decision = str(formData, 'decision') as 'verified' | 'rejected'
+  const note = str(formData, 'note') || null
+  if (decision !== 'verified' && decision !== 'rejected') throw new Error('Bad decision')
+  const { admin } = ctx
+  const { data: req, error: loadErr } = await admin
+    .from('verification_requests')
+    .select('id, user_id, type')
+    .eq('id', requestId)
+    .single()
+  if (loadErr || !req) throw new Error(loadErr?.message ?? 'Request not found')
+  const { error } = await admin
+    .from('verification_requests')
+    .update({
+      status: decision,
+      note,
+      reviewed_by: ctx.userId,
+      reviewed_at: new Date().toISOString(),
+    })
+    .eq('id', requestId)
+    .eq('status', 'pending')
+  if (error) throw new Error(error.message)
+  // The AFTER UPDATE trigger (apply_verification_decision) applies the badge,
+  // notifies and audit-logs. We log the decision itself as well.
+  await audit(ctx, `verification_${decision}`, 'verification_request', requestId, {
+    user_id: req.user_id,
+    type: req.type,
+  })
+  revalidatePath('/admin/verification')
+}
+
+// ---------------------------------------------------------------------------
+// Packages & pricing
+// ---------------------------------------------------------------------------
+
+export async function updatePackage(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const id = Number(str(formData, 'id'))
+  const priceInr = Number(str(formData, 'price_inr'))
+  const durationDays = Number(str(formData, 'duration_days'))
+  const name = str(formData, 'name')
+  const description = str(formData, 'description')
+  const featuresRaw = str(formData, 'features')
+  const benefitsRaw = str(formData, 'benefits')
+  const isActive = str(formData, 'is_active') === 'true'
+  const isPopular = str(formData, 'is_popular') === 'true'
+  const badgeText = str(formData, 'badge_text') || null
+
+  if (!Number.isFinite(id) || !Number.isFinite(priceInr) || priceInr <= 0) {
+    throw new Error('Invalid package input')
+  }
+  const features = featuresRaw
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  let benefits: Record<string, unknown>
+  try {
+    benefits = benefitsRaw ? (JSON.parse(benefitsRaw) as Record<string, unknown>) : {}
+  } catch {
+    throw new Error('Benefits must be valid JSON')
+  }
+
+  const { admin } = ctx
+  const { error } = await admin
+    .from('packages')
+    .update({
+      name: name || undefined,
+      description: description || undefined,
+      price_inr: Math.round(priceInr),
+      duration_days: Number.isFinite(durationDays) && durationDays > 0 ? durationDays : undefined,
+      features,
+      benefits: benefits as Json,
+      is_active: isActive,
+      is_popular: isPopular,
+      badge_text: badgeText,
+    })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'package_update', 'package', String(id), {
+    price_inr: priceInr,
+    duration_days: durationDays,
+    is_active: isActive,
+  })
+  revalidatePath('/admin/packages')
+  revalidatePath('/packages')
+}
+
+// ---------------------------------------------------------------------------
+// Payments
+// ---------------------------------------------------------------------------
+
+/** Manually activate a member's membership for a package (recovery path). */
+export async function manualActivate(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = str(formData, 'user_id')
+  const packageId = Number(str(formData, 'package_id'))
+  const note = str(formData, 'note')
+  if (!targetUserId || !Number.isFinite(packageId)) throw new Error('user_id + package_id required')
+  const { admin } = ctx
+  const { data, error } = await admin.rpc('activate_membership', {
+    p_user_id: targetUserId,
+    p_package_id: packageId,
+  })
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'manual_activation', 'user', targetUserId, { package_id: packageId, note, result: data })
+  revalidatePath('/admin/payments')
+}
+
+/** Mark a payment refunded (revokes the subscription). */
+export async function refundPayment(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const paymentId = str(formData, 'payment_id')
+  const { admin } = ctx
+  const { data, error } = await admin.rpc('refund_membership', { p_payment_id: paymentId })
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'payment_refund', 'payment', paymentId, { result: data })
+  revalidatePath('/admin/payments')
+}
+
+// ---------------------------------------------------------------------------
+// Reports
+// ---------------------------------------------------------------------------
+
+export async function resolveReport(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const reportId = Number(str(formData, 'report_id'))
+  const status = str(formData, 'status') as 'reviewing' | 'resolved' | 'dismissed'
+  if (!['reviewing', 'resolved', 'dismissed'].includes(status)) throw new Error('Bad status')
+  const { admin } = ctx
+  const { error } = await admin.from('reports').update({ status }).eq('id', reportId)
+  if (error) throw new Error(error.message)
+  await audit(ctx, `report_${status}`, 'report', String(reportId))
+  revalidatePath('/admin/reports')
+}
+
+// ---------------------------------------------------------------------------
+// Moments
+// ---------------------------------------------------------------------------
+
+export async function removeMoment(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const momentId = str(formData, 'moment_id')
+  const { admin } = ctx
+  const { error } = await admin.from('moments').update({ is_removed: true }).eq('id', momentId)
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'moment_removed', 'moment', momentId)
+  revalidatePath('/admin/moments')
+}
+
+// ---------------------------------------------------------------------------
+// Matching config
+// ---------------------------------------------------------------------------
+
+export async function updateMatchingConfig(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const threshold = Number(str(formData, 'threshold'))
+  const dailyCount = Number(str(formData, 'daily_count'))
+  const weightsRaw = str(formData, 'weights')
+  let weights: Record<string, unknown>
+  try {
+    weights = JSON.parse(weightsRaw) as Record<string, unknown>
+  } catch {
+    throw new Error('Weights must be valid JSON')
+  }
+  if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
+    throw new Error('Threshold must be 0–100')
+  }
+  const { admin } = ctx
+  const { error } = await admin
+    .from('matching_config')
+    .update({
+      threshold,
+      daily_count: Number.isFinite(dailyCount) ? Math.max(1, Math.round(dailyCount)) : 5,
+      weights: weights as Json,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', 1)
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'matching_config_update', 'matching_config', '1', { threshold, daily_count: dailyCount, weights })
+  revalidatePath('/admin/matching')
+}
+
+// ---------------------------------------------------------------------------
+// Success stories
+// ---------------------------------------------------------------------------
+
+export async function saveStory(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const id = str(formData, 'id')
+  const coupleNames = str(formData, 'couple_names')
+  const title = str(formData, 'title')
+  const story = str(formData, 'story')
+  const photoPath = str(formData, 'photo_path') || null
+  const weddingDate = str(formData, 'wedding_date') || null
+  const isPublished = str(formData, 'is_published') === 'true'
+  if (!coupleNames || !title || !story) throw new Error('couple_names, title and story are required')
+  const { admin } = ctx
+  if (id) {
+    const { error } = await admin
+      .from('success_stories')
+      .update({
+        couple_names: coupleNames,
+        title,
+        story,
+        photo_path: photoPath,
+        wedding_date: weddingDate,
+        is_published: isPublished,
+      })
+      .eq('id', id)
+    if (error) throw new Error(error.message)
+    await audit(ctx, 'story_update', 'success_story', id)
+  } else {
+    const { data, error } = await admin
+      .from('success_stories')
+      .insert({
+        couple_names: coupleNames,
+        title,
+        story,
+        photo_path: photoPath,
+        wedding_date: weddingDate,
+        is_published: isPublished,
+      })
+      .select('id')
+      .single()
+    if (error) throw new Error(error.message)
+    await audit(ctx, 'story_create', 'success_story', data?.id ?? null)
+  }
+  revalidatePath('/admin/stories')
+  revalidatePath('/success-stories')
+}
+
+export async function deleteStory(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const id = str(formData, 'id')
+  const { admin } = ctx
+  const { error } = await admin.from('success_stories').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'story_delete', 'success_story', id)
+  revalidatePath('/admin/stories')
+  revalidatePath('/success-stories')
+}
+
+// ---------------------------------------------------------------------------
+// Account deletion requests
+// ---------------------------------------------------------------------------
+
+/** Permanently delete the member (auth user + cascade) and close the request. */
+export async function processDeletion(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const requestId = Number(str(formData, 'request_id'))
+  const targetUserId = str(formData, 'user_id')
+  if (!Number.isFinite(requestId) || !targetUserId) throw new Error('request_id and user_id required')
+  const { admin } = ctx
+  // Delete the auth user — cascades profiles, matrimony_profiles, photos rows,
+  // interests, payments rows… everything keyed on the user id.
+  const { error: delErr } = await admin.auth.admin.deleteUser(targetUserId)
+  if (delErr) throw new Error(delErr.message)
+  await admin
+    .from('account_deletion_requests')
+    .update({ status: 'processed', processed_at: new Date().toISOString() })
+    .eq('id', requestId)
+  await audit(ctx, 'account_deleted', 'user', targetUserId, { request_id: requestId })
+  revalidatePath('/admin/deletions')
+  revalidatePath('/admin')
+}
+
+export async function cancelDeletion(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const requestId = Number(str(formData, 'request_id'))
+  const { admin } = ctx
+  const { error } = await admin
+    .from('account_deletion_requests')
+    .update({ status: 'cancelled' })
+    .eq('id', requestId)
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'account_deletion_cancelled', 'account_deletion_request', String(requestId))
+  revalidatePath('/admin/deletions')
+}
