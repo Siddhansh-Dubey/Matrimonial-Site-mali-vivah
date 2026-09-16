@@ -1,14 +1,12 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Clock, Mail, MessageCircle, PhoneCall, ShieldAlert } from 'lucide-react'
+import { SUPPORT_EMAIL, SUPPORT_PHONE_DISPLAY, whatsappLink } from '@/lib/contact'
 
 export const metadata: Metadata = {
   title: 'Contact Us',
   description: 'Reach the Mali Vivah team — support hours, WhatsApp community and how to report a profile.',
 }
-
-const SUPPORT_PHONE = '90000 00000' // operator is welcome to replace with the real support line
-const SUPPORT_EMAIL = 'hello@mali-vivah.com'
 
 export default function ContactPage() {
   return (
@@ -44,7 +42,7 @@ export default function ContactPage() {
           </a>
 
           <a
-            href="https://wa.me/919000000000?text=Namaskar%2C%20I%20need%20help%20with%20Mali%20Vivah"
+            href={whatsappLink('Namaskar, I need help with Mali Vivah')}
             target="_blank"
             rel="noopener noreferrer"
             className="card flex items-start gap-4 p-6 transition-shadow hover:shadow-card-float"
@@ -66,7 +64,7 @@ export default function ContactPage() {
             </span>
             <span>
               <span className="font-display text-lg font-bold text-maroon">Call</span>
-              <span className="mt-1 block text-sm text-stone-600">{SUPPORT_PHONE}</span>
+              <span className="mt-1 block text-sm text-stone-600">{SUPPORT_PHONE_DISPLAY}</span>
             </span>
           </div>
 
