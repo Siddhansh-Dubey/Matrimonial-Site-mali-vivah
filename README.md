@@ -49,8 +49,9 @@ Everyone else hitting `/admin` is redirected to `/login`.
 
 ## Support contact channels
 
-WhatsApp/phone/email shown in the footer + contact page live in ONE place:
-`src/lib/contact.ts` — set the real numbers before go-live.
+WhatsApp/phone/email shown in the footer + the contact section of the About page
+live in ONE place: `src/lib/contact.ts` — set the real numbers before go-live.
+(`src/app/contact/page.tsx` is only a redirect stub to `/about#contact`.)
 
 ## Database test harness
 

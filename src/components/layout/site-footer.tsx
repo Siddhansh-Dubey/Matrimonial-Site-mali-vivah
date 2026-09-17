@@ -10,7 +10,7 @@ const QUICK_LINKS = [
   { href: '/', key: 'nav.home' },
   { href: '/search', key: 'footer.browseProfiles' },
   { href: '/packages', key: 'nav.packages' },
-  { href: '/contact', key: 'nav.contact' },
+  { href: '/about#contact', key: 'nav.contact' },
 ]
 
 const IMPORTANT_LINKS = [

@@ -16,7 +16,6 @@ const NAV = [
   { href: '/success-stories', key: 'nav.stories' },
   { href: '/packages', key: 'nav.packages' },
   { href: '/about', key: 'nav.about' },
-  { href: '/contact', key: 'nav.contact' },
 ]
 
 function BrandMark() {
