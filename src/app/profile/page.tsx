@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import {
   BadgeCheck,
+  Check,
   Crown,
   Eye,
   Heart,
@@ -16,7 +17,11 @@ import { isSupabaseConfigured } from '@/lib/env'
 import { photoUrl } from '@/lib/profile/photos'
 import { ageFromDate } from '@/lib/profile/profile-schema'
 import { getActiveSubscription } from '@/lib/profile/subscription'
-import type { MatrimonyProfile, PartnerPreferences } from '@/lib/supabase/database.types'
+import { VisibilityBanner } from '@/components/profile/visibility-banner'
+import { BoostCard } from '@/components/profile/boost-card'
+import { VerificationCard } from '@/components/profile/verification-card'
+import { DeletionCard } from '@/components/profile/deletion-card'
+import type { MatrimonyProfile, PartnerPreferences, VisibilityReason } from '@/lib/supabase/database.types'
 
 export const metadata: Metadata = { title: 'My Profile' }
 
@@ -35,45 +40,51 @@ export default async function ProfileDashboardPage({
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [profileRes, mpRes, ppRes, photoRes, subscription] = await Promise.all([
+  // Lazy sweep first so an expired plan is reflected truthfully this render.
+  await supabase.rpc('sweep_my_membership').then(() => undefined, () => undefined)
+
+  const [profileRes, mpRes, ppRes, photoRes, subscription, visibilityRes, boostRes] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
     supabase.from('matrimony_profiles').select('*').eq('user_id', user.id).maybeSingle(),
     supabase.from('partner_preferences').select('*').eq('profile_id', user.id).maybeSingle(),
     supabase.from('profile_photos').select('*').eq('profile_id', user.id).order('sort_order'),
     getActiveSubscription(supabase, user.id),
+    supabase.rpc('profile_visibility_reason', { p_user_id: user.id }),
+    supabase.rpc('has_active_boost', { p_user_id: user.id }).then((r) => r.data === true, () => false),
   ])
 
   const fullName = profileRes.data?.full_name ?? 'Member'
   const mp = mpRes.data as MatrimonyProfile | null
   const pp = ppRes.data as PartnerPreferences | null
   const photos = photoRes.data ?? []
-  const primaryPhoto = photos.find((p) => p.is_primary)?.storage_path ?? photos[0]?.storage_path ?? null
+  const profilePhotos = photos.filter((p) => (p.kind ?? 'profile_photo') === 'profile_photo')
+  const hasFamilyPhoto = photos.some((p) => p.kind === 'family_photo')
+  const primaryPhoto =
+    profilePhotos.find((p) => p.is_primary)?.storage_path ?? profilePhotos[0]?.storage_path ?? null
   const age = ageFromDate(mp?.date_of_birth)
   const published = searchParams?.published === '1'
+  const visibility = visibilityRes.data as VisibilityReason | null
+  const hasBoost = boostRes
 
   const status = mp?.status ?? 'draft'
-  const isLive = status === 'active'
 
-  // simple completeness score
-  const fields = [
-    mp?.gender,
-    mp?.date_of_birth,
-    mp?.height_cm,
-    mp?.sub_community,
-    mp?.education,
-    mp?.occupation,
-    mp?.city,
-    mp?.about_me,
-    mp?.religion,
-    primaryPhoto,
+  // Publish-readiness checklist — must match the server-side gate
+  // (enforce_publishable_profile in migration 08).
+  const checklist: { label: string; done: boolean }[] = [
+    { label: 'Gender, birth date & city', done: Boolean(mp?.gender && mp?.date_of_birth && mp?.city) },
+    { label: 'Education & occupation', done: Boolean(mp?.education && mp?.occupation) },
+    { label: 'Profile photo', done: profilePhotos.length > 0 },
+    { label: 'Family photo', done: hasFamilyPhoto },
+    { label: 'Partner preferences', done: Boolean(pp) },
   ]
-  const filled = fields.filter((f) => Boolean(f)).length
-  const completeness = Math.round((filled / fields.length) * 100)
+  const done = checklist.filter((c) => c.done).length
+  const completeness = Math.round((done / checklist.length) * 100)
+  const readyToPublish = checklist.every((c) => c.done)
 
   return (
     <section className="bg-cream">
       <div className="container-page py-10 sm:py-14">
-        {published && (
+        {published && visibility?.is_public && (
           <div className="mx-auto mb-6 flex max-w-3xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
             <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
             <span>
@@ -83,7 +94,16 @@ export default async function ProfileDashboardPage({
           </div>
         )}
 
-        {subscription ? (
+        {/* ONE banner, always truthful about whether the profile is discoverable. */}
+        {visibility && (
+          <VisibilityBanner
+            visibility={visibility}
+            published={published}
+            className="mb-8"
+          />
+        )}
+
+        {subscription && (
           <div className="mx-auto mb-8 flex max-w-3xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
             <Crown className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
             <span>
@@ -100,19 +120,6 @@ export default async function ProfileDashboardPage({
                 Manage
               </Link>
             </span>
-          </div>
-        ) : (
-          <div className="mx-auto mb-8 flex max-w-3xl flex-col gap-3 rounded-2xl border border-gold-400/50 bg-gold-100/50 px-5 py-4 text-sm text-maroon-deep sm:flex-row sm:items-center">
-            <span>
-              You are on the <span className="font-semibold">free plan</span> — other profiles show
-              only photos and occupations to you.
-            </span>
-            <Link
-              href="/packages"
-              className="inline-flex items-center gap-1.5 rounded-full bg-maroon px-5 py-2 text-xs font-bold text-white hover:bg-maroon-dark sm:ml-auto"
-            >
-              <Crown className="h-3.5 w-3.5" /> View packages
-            </Link>
           </div>
         )}
 
@@ -131,7 +138,9 @@ export default async function ProfileDashboardPage({
               <div className="absolute inset-x-0 bottom-0 p-6 text-white">
                 <div className="flex items-center gap-2">
                   <BadgeCheck className="h-5 w-5 text-gold-300" />
-                  <span className="text-sm font-semibold">{isLive ? 'Live profile' : 'Draft profile'}</span>
+                  <span className="text-sm font-semibold">
+                    {visibility?.is_public ? 'Live profile' : 'Not publicly visible'}
+                  </span>
                 </div>
                 <h1 className="mt-1 font-display text-3xl font-bold">{fullName}</h1>
               </div>
@@ -159,26 +168,51 @@ export default async function ProfileDashboardPage({
                   <p className="mt-0.5 truncate text-sm text-stone-600">
                     {[mp?.education, mp?.occupation].filter(Boolean).join(' · ') || 'Add your education & occupation'}
                   </p>
-                  <p className="mt-1 text-xs text-stone-500">{mp?.sub_community ?? 'Sub-community not set'}</p>
+                  <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-stone-500">
+                    {mp?.sub_community ?? 'Sub-community not set'}
+                    {mp?.verified_at && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 font-bold text-emerald-800">
+                        <BadgeCheck className="h-3 w-3" /> Verified
+                      </span>
+                    )}
+                  </p>
                 </div>
               </div>
 
               <div className="mt-5">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="font-semibold text-stone-700">Profile completeness</span>
+                  <span className="font-semibold text-stone-700">Publish readiness</span>
                   <span className="font-bold text-maroon">{completeness}%</span>
                 </div>
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100">
-                  <div className="h-full rounded-full bg-gradient-to-r from-gold-400 to-brand-500" style={{ width: `${completeness}%` }} />
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-gold-400 to-brand-500"
+                    style={{ width: `${completeness}%` }}
+                  />
                 </div>
+                <ul className="mt-3 grid gap-1.5 text-[13px] sm:grid-cols-2">
+                  {checklist.map((c) => (
+                    <li key={c.label} className="flex items-center gap-1.5">
+                      {c.done ? (
+                        <Check className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                      ) : (
+                        <span className="h-3.5 w-3.5 shrink-0 rounded-full border-2 border-stone-300" aria-hidden />
+                      )}
+                      <span className={c.done ? 'text-stone-600' : 'font-semibold text-stone-800'}>{c.label}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
 
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link href="/profile/edit" className="btn-primary">
-                  <Pencil className="h-4 w-4" /> Edit profile
+                  <Pencil className="h-4 w-4" /> {readyToPublish ? 'Edit profile' : 'Complete your profile'}
                 </Link>
                 <Link href="/search" className="btn-secondary">
                   <Search className="h-4 w-4" /> Browse matches
+                </Link>
+                <Link href="/matches" className="btn-secondary">
+                  <Star className="h-4 w-4" /> Daily 5
                 </Link>
               </div>
             </div>
@@ -186,11 +220,28 @@ export default async function ProfileDashboardPage({
 
           {/* right: quick stats + actions */}
           <div className="space-y-6">
-            <div className="grid grid-cols-3 gap-3">
-              <StatCard href="/interests" icon={Heart} label="Interests" value={String((await countInterests(supabase, user.id)).received)} />
-              <StatCard href="/shortlist" icon={Star} label="Shortlisted" value={String((await countShortlists(supabase, user.id)))} />
-              <StatCard href="/profile" icon={Eye} label="Views" value={String((await countViews(supabase, user.id)))} />
+            <div className="grid grid-cols-2 gap-3">
+              <StatCard
+                href="/interests"
+                icon={Heart}
+                label="New interests"
+                value={String((await countPendingInterests(supabase, user.id)))}
+              />
+              <StatCard
+                href="/profile/views"
+                icon={Eye}
+                label="Profile views"
+                value={String((await countViews(supabase, user.id)))}
+              />
             </div>
+
+            <BoostCard hasActive={hasBoost} status={status} isPaid={Boolean(subscription)} />
+
+            <VerificationCard
+              verified={Boolean(mp?.verified_at)}
+              mobileVerified={Boolean(profileRes.data?.mobile_verified)}
+              reason={visibility?.reason ?? 'not_published'}
+            />
 
             <div className="card p-6">
               <h2 className="font-display text-lg font-bold text-maroon">Partner preferences</h2>
@@ -216,6 +267,8 @@ export default async function ProfileDashboardPage({
                 <Row label="Registered for" value={profileRes.data?.for_whom ?? 'self'} />
               </dl>
             </div>
+
+            <DeletionCard />
           </div>
         </div>
 
@@ -260,23 +313,22 @@ function StatCard({
 }
 
 /* lightweight server-side counts */
-async function countInterests(
+async function countPendingInterests(
   supabase: ReturnType<typeof createClient>,
   userId: string
-): Promise<{ received: number; sent: number }> {
-  const [recv, sent] = await Promise.all([
-    supabase.from('interests').select('id', { count: 'exact', head: true }).eq('receiver_id', userId).eq('status', 'pending'),
-    supabase.from('interests').select('id', { count: 'exact', head: true }).eq('sender_id', userId),
-  ])
-  return { received: recv.count ?? 0, sent: sent.count ?? 0 }
-}
-
-async function countShortlists(supabase: ReturnType<typeof createClient>, userId: string): Promise<number> {
-  const { count } = await supabase.from('shortlists').select('id', { count: 'exact', head: true }).eq('user_id', userId)
+): Promise<number> {
+  const { count } = await supabase
+    .from('interests')
+    .select('id', { count: 'exact', head: true })
+    .eq('receiver_id', userId)
+    .eq('status', 'pending')
   return count ?? 0
 }
 
 async function countViews(supabase: ReturnType<typeof createClient>, userId: string): Promise<number> {
-  const { count } = await supabase.from('profile_views').select('id', { count: 'exact', head: true }).eq('viewed_id', userId)
+  const { count } = await supabase
+    .from('profile_views')
+    .select('id', { count: 'exact', head: true })
+    .eq('viewed_id', userId)
   return count ?? 0
 }

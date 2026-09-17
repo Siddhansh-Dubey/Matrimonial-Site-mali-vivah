@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import Image from 'next/image'
-import { MapPin, GraduationCap, Briefcase, ArrowRight, Lock } from 'lucide-react'
+import { MapPin, GraduationCap, Briefcase, ArrowRight, BadgeCheck, Lock, Rocket } from 'lucide-react'
 import { photoUrl } from '@/lib/profile/photos'
 import { MASK_BLUR_CLASS } from '@/lib/profile/mask'
 import type { MatchCard as MatchCardType } from '@/lib/supabase/database.types'
@@ -50,9 +50,16 @@ export function MatchCard({
             </span>
           </div>
         )}
-        <span className="absolute left-3.5 top-3.5 rounded-full bg-gold-300 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-maroon-deep shadow-sm">
-          {badge}
-        </span>
+        <div className="absolute left-3.5 top-3.5 flex flex-col items-start gap-1.5">
+          <span className="rounded-full bg-gold-300 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-maroon-deep shadow-sm">
+            {badge}
+          </span>
+          {match.is_boosted && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-maroon/90 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-gold-300 shadow-sm">
+              <Rocket className="h-3 w-3" /> Boosted
+            </span>
+          )}
+        </div>
         {!isPaid && (
           <span className="absolute right-3.5 top-3.5 inline-flex items-center gap-1 rounded-full bg-maroon-deep/85 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
             <Lock className="h-3 w-3" /> Free preview
@@ -63,6 +70,9 @@ export function MatchCard({
       <div className="flex flex-1 flex-col px-5 pb-6 pt-5">
         <h3 className="font-display text-[21px] font-bold leading-snug text-maroon">
           {displayName}
+          {match.verified && (
+            <BadgeCheck className="ml-1.5 inline h-4.5 w-4.5 align-text-bottom text-emerald-600" aria-label="Verified profile" />
+          )}
         </h3>
 
         {isPaid ? (

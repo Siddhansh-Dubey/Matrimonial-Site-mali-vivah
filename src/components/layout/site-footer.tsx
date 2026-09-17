@@ -4,6 +4,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { Heart } from 'lucide-react'
 import { useI18n } from '@/lib/i18n/provider'
+import { whatsappLink } from '@/lib/contact'
 
 const QUICK_LINKS = [
   { href: '/', key: 'nav.home' },
@@ -123,7 +124,7 @@ export function SiteFooter() {
           <div>
             <FooterHeading>{t('footer.heading.connect')}</FooterHeading>
             <a
-              href="https://wa.me/919876543210"
+              href={whatsappLink('Namaskar, I have a question about Mali Vivah')}
               target="_blank"
               rel="noopener noreferrer"
               className="group mt-6 inline-flex max-w-xs items-center gap-3.5 rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 transition-colors hover:border-gold-400/40 hover:bg-white/10"

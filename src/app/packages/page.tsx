@@ -10,7 +10,11 @@ import type { PackageRow } from '@/lib/supabase/database.types'
 export const metadata: Metadata = { title: 'Packages' }
 export const dynamic = 'force-dynamic'
 
-export default async function PackagesPage() {
+export default async function PackagesPage({
+  searchParams,
+}: {
+  searchParams?: { payment?: string }
+}) {
   const supabase = isSupabaseConfigured ? createClient() : null
   const {
     data: { user },
@@ -51,6 +55,24 @@ export default async function PackagesPage() {
             and the phone number is revealed once interest is mutual.
           </p>
         </div>
+
+        {searchParams?.payment === 'success' && (
+          <div className="mx-auto mt-8 flex max-w-2xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
+            <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+            <span>
+              <span className="font-bold">Payment successful.</span> Your membership is now active
+              and your profile is being published in Brides &amp; Grooms. If your profile is not
+              live within a minute, open <Link href="/profile/edit" className="font-semibold underline underline-offset-2">your profile</Link>{' '}
+              and complete any missing details.
+            </span>
+          </div>
+        )}
+        {searchParams?.payment === 'cancelled' && (
+          <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-stone-200 bg-white/70 px-5 py-4 text-center text-sm text-stone-600">
+            The checkout was closed before completing payment — nothing was charged. You can
+            restart whenever you are ready.
+          </div>
+        )}
 
         {user && subscription ? (
           <div className="mx-auto mt-8 flex max-w-2xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
@@ -134,7 +156,7 @@ export default async function PackagesPage() {
                     <PurchaseButton
                       packageId={pkg.id}
                       packageSlug={pkg.slug}
-                      durationDays={pkg.duration_days}
+                      priceInr={pkg.price_inr}
                       featured={featured}
                       hasActive={Boolean(subscription)}
                     />
