@@ -3,30 +3,36 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { Eye, EyeOff, Heart, Lock, Mail, Phone, ShieldCheck, Sparkles, Users } from 'lucide-react'
+import { Eye, EyeOff, Heart, IdCard, Lock, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { useI18n } from '@/lib/i18n/provider'
 import { isSupabaseConfigured } from '@/lib/env'
 import { lastTenDigits, loginSchema } from '@/lib/auth/login-schema'
 import { signInWithMobile } from '@/app/login/actions'
 
+/** Where "remember me" keeps the identifier the member actually used. */
+const REMEMBER_KEY = 'mali-vivah:remember-identifier'
+/** Pre-single-field key — read once, migrated, then dropped. */
+const LEGACY_REMEMBER_KEY = 'mali-vivah:remember-email'
+
 type FieldErrors = {
-  email?: string
-  mobile?: string
+  identifier?: string
   password?: string
 }
 
-function formatMobile(raw: string): string {
-  const digits = raw.replace(/\D/g, '').slice(0, 10)
-  if (digits.length <= 5) return digits
-  return `${digits.slice(0, 5)} ${digits.slice(5)}`
-}
-
+/**
+ * Single sign-in form: ONE identifier (email ID *or* mobile number) + password.
+ *
+ * Which credential is used is decided by the identifier itself (see
+ * `parseIdentifier`): an email goes straight to Supabase password auth, a
+ * mobile number goes to the `signInWithMobile` server action, which resolves
+ * the account behind `profiles.mobile` and authenticates it server-side — the
+ * stored email never has to round-trip through the browser.
+ */
 export function LoginForm() {
   const { t } = useI18n()
   const router = useRouter()
 
-  const [email, setEmail] = useState('')
-  const [mobile, setMobile] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [remember, setRemember] = useState(true)
   const [showPassword, setShowPassword] = useState(false)
@@ -36,11 +42,16 @@ export function LoginForm() {
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    const saved = window.localStorage.getItem('mali-vivah:remember-email')
-    if (saved) {
-      setEmail(saved)
+    const saved = window.localStorage.getItem(REMEMBER_KEY)
+    // Members who signed in before the single-field form existed still get
+    // their address prefilled — then the legacy key is retired.
+    const legacy = window.localStorage.getItem(LEGACY_REMEMBER_KEY)
+    const prefill = saved ?? legacy
+    if (prefill) {
+      setIdentifier(prefill)
       setRemember(true)
     }
+    if (legacy !== null) window.localStorage.removeItem(LEGACY_REMEMBER_KEY)
   }, [])
 
   const trust = useMemo(
@@ -52,20 +63,27 @@ export function LoginForm() {
     []
   )
 
+  // A numeric keypad once the member starts typing a number; the email keypad
+  // otherwise. One field, so no artificial "+91" prefix box.
+  const identifierInputMode = /^[+\d]/.test(identifier.trim()) ? 'tel' : 'email'
+
+  /** Store or clear the identifier the member actually signed in with. */
+  function persistIdentifier(value: string | null) {
+    if (remember && value) window.localStorage.setItem(REMEMBER_KEY, value)
+    else window.localStorage.removeItem(REMEMBER_KEY)
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setFormError(null)
     setInfo(null)
 
-    const parsed = loginSchema.safeParse({ email, mobile, password })
+    const parsed = loginSchema.safeParse({ identifier, password })
     if (!parsed.success) {
       const next: FieldErrors = {}
       for (const issue of parsed.error.issues) {
-        const field = issue.path[0]
-        if (issue.message === 'identifier-required') next.email = t('login.error.identifier')
-        else if (field === 'email') next.email = t('login.error.email')
-        else if (field === 'mobile') next.mobile = t('login.error.mobile')
-        else if (field === 'password') next.password = t('login.error.password')
+        if (issue.path[0] === 'password') next.password = t('login.error.password')
+        else next.identifier = t(issue.message === 'identifier-required' ? 'login.error.identifier' : 'login.error.invalid')
       }
       setFieldErrors(next)
       return
@@ -80,21 +98,18 @@ export function LoginForm() {
         return
       }
 
-      // Mobile-only sign-in: resolve + authenticate server-side so the stored
-      // email never has to round-trip through the browser.
-      if (!parsed.data.email) {
-        const result = await signInWithMobile(parsed.data.mobile, parsed.data.password)
+      const { credential } = parsed.data
+
+      // Mobile sign-in: resolve + authenticate server-side so the stored email
+      // is never exposed to the browser. Same generic failure as a bad email
+      // login, so neither path can be used to enumerate accounts.
+      if (credential.kind === 'mobile') {
+        const result = await signInWithMobile(credential.value, parsed.data.password)
         if (!result.ok) {
-          setFormError(
-            t(result.error === 'unavailable' ? 'login.error.env' : 'login.error.mobileGeneric')
-          )
+          setFormError(t(result.error === 'unavailable' ? 'login.error.env' : 'login.error.generic'))
           return
         }
-        if (remember) {
-          window.localStorage.setItem('mali-vivah:remember-email', result.email)
-        } else {
-          window.localStorage.removeItem('mali-vivah:remember-email')
-        }
+        persistIdentifier(credential.value)
         router.push('/profile')
         router.refresh()
         return
@@ -103,7 +118,7 @@ export function LoginForm() {
       const { createClient } = await import('@/lib/supabase/client')
       const supabase = createClient()
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: parsed.data.email,
+        email: credential.value,
         password: parsed.data.password,
       })
 
@@ -125,15 +140,6 @@ export function LoginForm() {
         (typeof data.user.user_metadata?.phone === 'string' ? data.user.user_metadata.phone : '') ||
         (typeof data.user.user_metadata?.mobile === 'string' ? data.user.user_metadata.mobile : '')
 
-      const storedDigits = lastTenDigits(profile?.mobile ?? metaPhone)
-      // The mobile double-check only applies when one was typed — an email ID
-      // on its own is a complete identity now.
-      if (parsed.data.mobile && storedDigits && storedDigits !== parsed.data.mobile) {
-        await supabase.auth.signOut()
-        setFormError(t('login.error.mismatch'))
-        return
-      }
-
       if (!profile) {
         // Self-heal: create the missing profile row for pre-migration accounts.
         // Insert WITHOUT the mobile first — profiles.mobile is UNIQUE, and a
@@ -148,17 +154,15 @@ export function LoginForm() {
         const metaForWhom = data.user.user_metadata?.for_whom
         const { error: healError } = await supabase.from('profiles').insert({
           id: data.user.id,
-          email: (data.user.email ?? parsed.data.email).toLowerCase(),
+          email: (data.user.email ?? credential.value).toLowerCase(),
           full_name: metaName.length >= 2 ? metaName : 'Mali Vivah Member',
           for_whom: metaForWhom === 'son' || metaForWhom === 'daughter' ? metaForWhom : 'self',
         })
         if (healError) {
           console.warn('[login] profile backfill skipped:', healError.message)
         } else {
-          const healMobile = [lastTenDigits(metaPhone), parsed.data.mobile].find((m) =>
-            /^[6-9]\d{9}$/.test(m),
-          )
-          if (healMobile) {
+          const healMobile = lastTenDigits(metaPhone)
+          if (/^[6-9]\d{9}$/.test(healMobile)) {
             const { error: mobileError } = await supabase
               .from('profiles')
               .update({ mobile: healMobile })
@@ -190,11 +194,7 @@ export function LoginForm() {
         console.warn('[login] record_login skipped:', auditError.message)
       }
 
-      if (remember) {
-        window.localStorage.setItem('mali-vivah:remember-email', parsed.data.email)
-      } else {
-        window.localStorage.removeItem('mali-vivah:remember-email')
-      }
+      persistIdentifier(credential.value)
 
       router.push('/profile')
       router.refresh()
@@ -260,74 +260,31 @@ export function LoginForm() {
 
             <form className="mt-8 space-y-5" onSubmit={onSubmit} noValidate>
               <div>
-                <label htmlFor="login-email" className="label">
-                  {t('login.email')}
-                  <span className="ml-1.5 text-[11px] font-normal text-stone-400">({t('login.optional')})</span>
+                <label htmlFor="login-identifier" className="label">
+                  {t('login.identifier')}
                 </label>
                 <div className="relative">
-                  <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" aria-hidden />
+                  <IdCard className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" aria-hidden />
                   <input
-                    id="login-email"
-                    name="email"
-                    type="email"
-                    autoComplete="email"
-                    inputMode="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder={t('login.email.placeholder')}
-                    aria-invalid={Boolean(fieldErrors.email)}
-                    aria-describedby={fieldErrors.email ? 'login-email-error' : undefined}
+                    id="login-identifier"
+                    name="identifier"
+                    type="text"
+                    autoComplete="username"
+                    inputMode={identifierInputMode}
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder={t('login.identifier.placeholder')}
+                    aria-invalid={Boolean(fieldErrors.identifier)}
+                    aria-describedby={fieldErrors.identifier ? 'login-identifier-error' : undefined}
                     className="input pl-11"
+                    maxLength={254}
                   />
                 </div>
-                {fieldErrors.email && (
-                  <p id="login-email-error" className="mt-1.5 text-xs text-brand-700">
-                    {fieldErrors.email}
+                {fieldErrors.identifier ? (
+                  <p id="login-identifier-error" className="mt-1.5 text-xs text-brand-700">
+                    {fieldErrors.identifier}
                   </p>
-                )}
-              </div>
-
-              <div className="relative py-1">
-                <div aria-hidden className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-stone-200" />
-                </div>
-                <div className="relative flex justify-center">
-                  <span className="bg-white px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-stone-400">
-                    {t('login.or')}
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="login-mobile" className="label">
-                  {t('login.mobile')}
-                  <span className="ml-1.5 text-[11px] font-normal text-stone-400">({t('login.optional')})</span>
-                </label>
-                <div className="relative flex">
-                  <span className="inline-flex items-center gap-1.5 rounded-l-xl border border-r-0 border-stone-300 bg-stone-50 px-3 text-sm font-medium text-stone-600">
-                    <Phone className="h-3.5 w-3.5 text-stone-400" aria-hidden />
-                    +91
-                  </span>
-                  <input
-                    id="login-mobile"
-                    name="mobile"
-                    type="tel"
-                    autoComplete="tel-national"
-                    inputMode="numeric"
-                    value={mobile}
-                    onChange={(e) => setMobile(formatMobile(e.target.value))}
-                    placeholder={t('login.mobile.placeholder')}
-                    aria-invalid={Boolean(fieldErrors.mobile)}
-                    aria-describedby={fieldErrors.mobile ? 'login-mobile-error' : undefined}
-                    className="input rounded-l-none"
-                    maxLength={11}
-                  />
-                </div>
-                {fieldErrors.mobile && (
-                  <p id="login-mobile-error" className="mt-1.5 text-xs text-brand-700">
-                    {fieldErrors.mobile}
-                  </p>
-                )}
+                ) : null}
               </div>
 
               <div>

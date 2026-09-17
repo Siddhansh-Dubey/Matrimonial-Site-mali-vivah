@@ -20,6 +20,7 @@ import { photoUrl } from '@/lib/profile/photos'
 import { MASK_BLUR_CLASS, maskPhone } from '@/lib/profile/mask'
 import { getProfileVisibility } from '@/lib/profile/visibility'
 import { ProfileActions } from '@/components/profile/profile-actions'
+import { MessageButton, type MessageButtonState } from '@/components/chat/message-button'
 import type { PublicProfileCard } from '@/lib/supabase/database.types'
 
 export const metadata: Metadata = { title: 'Profile' }
@@ -55,6 +56,16 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
         phone: null,
       }
   const { isPaid, mutual, canSeeDetails, canSeePhone, phone } = visibility
+
+  // Chat follows the same gates as the phone reveal: a paid viewer AND a
+  // mutual match. Payment alone never opens a conversation, and a free viewer
+  // gets the upgrade prompt instead of a dead button. The database re-checks
+  // all of this when the button is used.
+  const messageState: MessageButtonState = !isPaid
+    ? 'needs_package'
+    : mutual
+      ? 'ready'
+      : 'needs_mutual'
 
   // Record the view (best effort — never block the page).
   if (user) {
@@ -336,7 +347,19 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                     </Link>
                   </div>
                 ) : (
-                  <ProfileActions profileId={profile.id} />
+                  <>
+                    {messageState === 'ready' && (
+                      <div className="mb-4">
+                        <MessageButton otherUserId={profile.id} state={messageState} />
+                      </div>
+                    )}
+                    <ProfileActions profileId={profile.id} />
+                    {messageState !== 'ready' && (
+                      <div className="mt-4 border-t border-stone-100 pt-4">
+                        <MessageButton otherUserId={profile.id} state={messageState} />
+                      </div>
+                    )}
+                  </>
                 )
               ) : (
                 <div className="rounded-2xl bg-brand-50 px-4 py-4 text-center">

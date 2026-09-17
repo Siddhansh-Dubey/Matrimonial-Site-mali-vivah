@@ -7,6 +7,7 @@ import { ArrowRight, LogOut, Menu, UserRound, X } from 'lucide-react'
 import { useI18n } from '@/lib/i18n/provider'
 import { LanguageToggle } from '@/components/ui/language-toggle'
 import { NotificationBell } from '@/components/layout/notification-bell'
+import { MessagesNavItem } from '@/components/chat/messages-nav-item'
 import { isSupabaseConfigured } from '@/lib/env'
 
 const NAV = [
@@ -125,6 +126,8 @@ export function SiteHeader() {
               </Link>
             )
           })}
+          {/* Messaging is a member feature — shown once signed in, locked for free members. */}
+          {userId && <MessagesNavItem userId={userId} />}
         </nav>
 
         <div className="hidden items-center gap-3 lg:flex">
@@ -184,6 +187,7 @@ export function SiteHeader() {
                 {t(item.key)}
               </Link>
             ))}
+            {userId && <MessagesNavItem userId={userId} mobile onNavigate={() => setOpen(false)} />}
             <div className="mt-3 flex flex-col gap-2.5 border-t border-stone-200/70 pt-4">
               <div className="flex items-center justify-between">
                 <LanguageToggle />

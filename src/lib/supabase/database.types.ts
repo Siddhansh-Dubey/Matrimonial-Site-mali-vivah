@@ -15,6 +15,9 @@
  * - 20260915110000_payments.sql               (payments, activity_events, subscriptions lockdown)
  * - 20260915120000_safety_interests.sql       (blocks, reports, express_interest, deletion)
  * - 20260915130000_engagement_admin.sql       (Daily 5, boosts, featured, verification, moments, stories, admin)
+ * - 20260915140000_activity_login_register.sql (registration + login activity events)
+ * - 20260917000000_notification_enum_message_received.sql (notification_type += message_received)
+ * - 20260917010000_chat.sql                   (conversations, conversation_members, messages + chat RPCs)
  *
  * If you change the SQL, update this file to match.
  */
@@ -1183,6 +1186,129 @@ export type Database = {
           },
         ]
       }
+      /**
+       * One row per pair of members allowed to chat. Written ONLY by
+       * get_or_create_conversation() — `authenticated` has no write grant.
+       */
+      conversations: {
+        Row: {
+          id: string
+          member_a: string
+          member_b: string
+          created_at: string
+          updated_at: string
+          last_message_at: string | null
+        }
+        Insert: {
+          id?: string
+          member_a: string
+          member_b: string
+          created_at?: string
+          updated_at?: string
+          last_message_at?: string | null
+        }
+        Update: {
+          id?: string
+          member_a?: string
+          member_b?: string
+          created_at?: string
+          updated_at?: string
+          last_message_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'conversations_member_a_fkey'
+            columns: ['member_a']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'conversations_member_b_fkey'
+            columns: ['member_b']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      /** Participants of a conversation (the RLS anchor). */
+      conversation_members: {
+        Row: {
+          conversation_id: string
+          user_id: string
+          joined_at: string
+        }
+        Insert: {
+          conversation_id: string
+          user_id: string
+          joined_at?: string
+        }
+        Update: {
+          conversation_id?: string
+          user_id?: string
+          joined_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'conversation_members_conversation_id_fkey'
+            columns: ['conversation_id']
+            isOneToOne: false
+            referencedRelation: 'conversations'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'conversation_members_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      /** Chat messages. Text only; written ONLY by send_message(). */
+      messages: {
+        Row: {
+          id: string
+          conversation_id: string
+          sender_id: string
+          body: string
+          created_at: string
+          read_at: string | null
+        }
+        Insert: {
+          id?: string
+          conversation_id: string
+          sender_id: string
+          body: string
+          created_at?: string
+          read_at?: string | null
+        }
+        Update: {
+          id?: string
+          conversation_id?: string
+          sender_id?: string
+          body?: string
+          created_at?: string
+          read_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'messages_conversation_id_fkey'
+            columns: ['conversation_id']
+            isOneToOne: false
+            referencedRelation: 'conversations'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'messages_sender_id_fkey'
+            columns: ['sender_id']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -1264,6 +1390,26 @@ export type Database = {
       unread_notification_count: { Args: Record<string, never>; Returns: number }
       mark_notification_read: { Args: { p_id: number }; Returns: undefined }
       mark_all_notifications_read: { Args: Record<string, never>; Returns: number }
+      /** Coarse chat verdict: { allowed, reason } — never leaks account details. */
+      chat_eligibility: { Args: { p_other_user_id: string }; Returns: Json }
+      /** Resolves/creates the one conversation between the caller and a member. */
+      get_or_create_conversation: { Args: { p_other_user_id: string }; Returns: Json }
+      /** The caller's conversation list (name, photo, preview, unread). */
+      chat_inbox: { Args: { p_limit?: number | null }; Returns: Json }
+      /** Conversation header + whether the caller may currently send. */
+      get_conversation: { Args: { p_conversation_id: string }; Returns: Json }
+      /** Newest messages of one of the caller's conversations, oldest-first. */
+      list_messages: {
+        Args: { p_conversation_id: string; p_limit?: number | null }
+        Returns: Json
+      }
+      /** The only message-write path; re-verifies every rule per send. */
+      send_message: {
+        Args: { p_conversation_id: string; p_body: string }
+        Returns: Json
+      }
+      mark_conversation_read: { Args: { p_conversation_id: string }; Returns: number }
+      unread_message_count: { Args: Record<string, never>; Returns: number }
     }
     Enums: {
       for_whom: 'self' | 'son' | 'daughter'
@@ -1288,6 +1434,7 @@ export type Database = {
         | 'profile_verified'
         | 'payment_received'
         | 'admin_message'
+        | 'message_received'
       payment_status: 'created' | 'authorized' | 'captured' | 'failed' | 'refunded' | 'cancelled'
       report_reason: 'fake_profile' | 'incorrect_information' | 'inappropriate_content' | 'harassment' | 'spam' | 'other'
       report_status: 'open' | 'reviewing' | 'resolved' | 'dismissed'
@@ -1328,6 +1475,9 @@ export type MomentRow = Database['public']['Tables']['moments']['Row']
 export type SuccessStoryRow = Database['public']['Tables']['success_stories']['Row']
 export type MatchingConfigRow = Database['public']['Tables']['matching_config']['Row']
 export type AccountDeletionRequestRow = Database['public']['Tables']['account_deletion_requests']['Row']
+export type ConversationRow = Database['public']['Tables']['conversations']['Row']
+export type ConversationMemberRow = Database['public']['Tables']['conversation_members']['Row']
+export type MessageRow = Database['public']['Tables']['messages']['Row']
 
 export type Gender = Database['public']['Enums']['gender']
 export type MaritalStatus = Database['public']['Enums']['marital_status']
@@ -1458,6 +1608,62 @@ export type NotificationItem = Pick<
   NotificationRow,
   'id' | 'type' | 'title' | 'message' | 'link' | 'is_read' | 'created_at'
 >
+
+/** A conversation row in the /messages list (output of chat_inbox()). */
+export type ConversationSummary = {
+  conversation_id: string
+  other_user_id: string
+  name: string
+  photo: string | null
+  last_message: string | null
+  last_message_at: string | null
+  unread_count: number
+  /** False once the other member's plan lapses — history stays readable. */
+  other_is_member: boolean
+  created_at: string
+}
+
+/** Header of the open conversation (output of get_conversation()). */
+export type ConversationDetail = {
+  conversation_id: string
+  other_user_id: string
+  name: string
+  photo: string | null
+  other_is_member: boolean
+  /** Both members paid + mutual interest + no block, evaluated live. */
+  can_send: boolean
+  created_at: string
+}
+
+/** One chat message (output of list_messages() / send_message()). */
+export type ChatMessageItem = {
+  id: string
+  conversation_id: string
+  sender_id: string
+  body: string
+  created_at: string
+  read_at: string | null
+}
+
+/**
+ * Why chat is (not) available. Deliberately coarse: 'unavailable' covers
+ * self, non-mutual interest, blocks and a lapsed plan on the other side, so
+ * the verdict cannot be used to probe accounts or subscriptions.
+ */
+export type ChatEligibility = {
+  allowed: boolean
+  reason: 'ok' | 'unauthenticated' | 'membership_required' | 'unavailable'
+}
+
+/** Output of get_or_create_conversation(). */
+export type StartConversationResult = {
+  conversation_id: string
+  other_user_id: string
+  created: boolean
+}
+
+/** Hard cap enforced by the messages CHECK constraint and send_message(). */
+export const CHAT_MESSAGE_LIMIT = 2000
 
 /** A moment card in list_moments(). */
 export type MomentItem = {

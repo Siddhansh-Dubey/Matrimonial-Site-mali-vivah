@@ -10,6 +10,7 @@ import { photoUrl } from '@/lib/profile/photos'
 import { hasActiveSubscription } from '@/lib/profile/subscription'
 import { mutualFromStatuses } from '@/lib/profile/visibility'
 import { InterestActions } from '@/components/profile/interest-actions'
+import { MessageButton, type MessageButtonState } from '@/components/chat/message-button'
 import type { Interest, InterestStatus } from '@/lib/supabase/database.types'
 
 export const metadata: Metadata = { title: 'Interests' }
@@ -51,12 +52,20 @@ export default async function InterestsPage() {
     .select('profile_id, storage_path')
     .in('profile_id', ids.length ? ids : [emptyId])
     .eq('is_primary', true)
+  // Who still holds a live plan right now — messaging needs BOTH sides paid.
+  const { data: activeMembers } = await admin
+    .from('subscriptions')
+    .select('user_id')
+    .in('user_id', ids.length ? ids : [emptyId])
+    .eq('status', 'active')
+    .gt('expires_at', new Date().toISOString())
 
   const nameById = new Map((counterparties.data ?? []).map((p) => [p.id, p.full_name]))
   const mobileById = new Map(
     (counterparties.data ?? []).map((p) => [p.id, (p as { mobile?: string | null }).mobile ?? null])
   )
   const photoById = new Map((counterPhoto.data ?? []).map((p) => [p.profile_id, p.storage_path]))
+  const memberIds = new Set((activeMembers ?? []).map((row) => row.user_id))
 
   // Mutual map: for each counterparty, is interest mutual?
   const sentByReceiver = new Map(sent.map((s) => [s.receiver_id, s.status as InterestStatus]))
@@ -76,6 +85,12 @@ export default async function InterestsPage() {
   // Phone visible iff paid AND mutual.
   const displayPhone = (id: string): string | null =>
     isPaid && mutualById.get(id) ? (mobileById.get(id) ?? null) : null
+
+  // Chat uses the SAME mutual-interest gate as the phone reveal, plus a live
+  // plan on both sides. A counterparty whose plan lapsed simply reads as "not
+  // mutual yet" — the message never reveals another member's billing state.
+  const messageStateFor = (id: string): MessageButtonState =>
+    !isPaid ? 'needs_package' : mutualById.get(id) && memberIds.has(id) ? 'ready' : 'needs_mutual'
 
   return (
     <section className="bg-cream">
@@ -142,7 +157,14 @@ export default async function InterestsPage() {
                           View profile
                         </Link>
                       </div>
-                      <InterestActions interestId={i.id} current={i.status} isMutual={mutual} />
+                      <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+                        <InterestActions interestId={i.id} current={i.status} isMutual={mutual} />
+                        <MessageButton
+                          otherUserId={i.sender_id}
+                          state={messageStateFor(i.sender_id)}
+                          variant="inline"
+                        />
+                      </div>
                     </li>
                   )
                 })}
@@ -180,14 +202,21 @@ export default async function InterestsPage() {
                         <p className="mt-0.5 text-xs text-stone-500">{formatDate(i.created_at)}</p>
                         <PhoneLine phone={phone} mutual={mutual} isPaid={isPaid} />
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Link
-                          href={`/profile/${i.receiver_id}`}
-                          className="rounded-full border-[1.5px] border-brand-300/80 bg-brand-50 px-4 py-1.5 text-xs font-bold text-brand-800 hover:border-brand-600 hover:bg-brand-600 hover:text-white"
-                        >
-                          View
-                        </Link>
-                        <StatusPill status={i.status} mutual={mutual} />
+                      <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/profile/${i.receiver_id}`}
+                            className="rounded-full border-[1.5px] border-brand-300/80 bg-brand-50 px-4 py-1.5 text-xs font-bold text-brand-800 hover:border-brand-600 hover:bg-brand-600 hover:text-white"
+                          >
+                            View
+                          </Link>
+                          <StatusPill status={i.status} mutual={mutual} />
+                        </div>
+                        <MessageButton
+                          otherUserId={i.receiver_id}
+                          state={messageStateFor(i.receiver_id)}
+                          variant="inline"
+                        />
                       </div>
                     </li>
                   )

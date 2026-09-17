@@ -19,6 +19,8 @@ const ICONS: Partial<Record<NotificationType, typeof Bell>> = {
   profile_verified: ShieldCheck,
   payment_received: CheckCheck,
   admin_message: MessageSquare,
+  // Chat — same bell, same feed, same read-state RPCs (no second system).
+  message_received: MessageSquare,
 }
 
 function timeAgo(iso: string): string {

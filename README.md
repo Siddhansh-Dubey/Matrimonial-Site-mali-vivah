@@ -21,8 +21,10 @@ SQL Editor → test register/login.
 
 ## What ships in this app
 
-- **Registration / login** — profiles auto-created, login audited, every
-  registration + login recorded in one `activity_events` stream.
+- **Registration / login** — one identifier field (email ID **or** mobile
+  number) plus a password; mobile sign-in resolves the account server-side so
+  the stored email never reaches the browser. Profiles auto-created, login
+  audited, every registration + login recorded in one `activity_events` stream.
 - **Visibility rules** — free members can build a full profile but stay hidden;
   paid members are public. Contact details unlock only after a *mutual, accepted*
   interest — payment alone never reveals a phone number.
@@ -31,6 +33,12 @@ SQL Editor → test register/login.
 - **Daily 5 compatible matches, Mali Moments (24h), profile boosts, homepage
   featured profiles, success stories, biodata PDF** (unlocked for the member and
   for mutual-accepted paid viewers).
+- **In-app messaging at `/messages`** — paid members with a **mutual** match
+  only. Conversations, messages, read state and unread badges live in
+  Supabase with RLS; writes go exclusively through SECURITY DEFINER RPCs that
+  re-check membership, mutual interest and blocks on every send, and new
+  messages arrive live over Supabase Realtime. Payment alone never opens a
+  chat, and a lapsed plan pauses messaging without deleting history.
 - **Safety** — report + block, verification requests (photo/ID reviewed in admin).
 - **Admin panel at `/admin`** — RBAC via `profiles.is_admin`, every mutation is a
   server action audited into `admin_audit_log`: members, verification queue,
