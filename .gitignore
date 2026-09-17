@@ -11,3 +11,6 @@ next-env.d.ts
 .DS_Store
 npm-debug.log*
 coverage
+# Supabase CLI
+supabase/.temp/
+supabase/.branches/
