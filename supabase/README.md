@@ -183,12 +183,21 @@ Dashboard → **Authentication** → **Providers** → **Email**:
 
 - ✅ **Confirm email** → ON (users verify via the link the app already sends;
   `email_verified` flips to true automatically via the trigger).
-- Site URL → your production URL (used by `emailRedirectTo`).
+- Site URL → your production URL.
+- **Redirect URLs → allow-list `{SITE_URL}/verify`** (e.g.
+  `https://mali-vivah.com/verify`, plus `http://localhost:3000/verify` for
+  local testing). Sign-up sends confirmation links to `/verify`, which
+  establishes the session and lands the new member on `/profile`. Supabase
+  silently falls back to the Site URL for any destination not allow-listed
+  here — so a missing entry means users land on the homepage.
 
 ### 6. Test end-to-end
 
 1. `npm run dev` → open `/register` → create an account.
-2. Confirm the email link, then sign in at `/login`.
+2. Open the confirmation link → it lands on `/verify` and bounces you to
+   `/profile` (the registering tab auto-follows within a few seconds). If the
+   link takes you to the homepage instead, `/verify` is missing from the
+   Redirect URLs allow-list (step 5).
 3. Dashboard → Table Editor → `profiles` → your row is there with
    `login_count = 1`, `last_login_at` set, and `email_verified = true`.
 4. `login_history` has one row for the login.
@@ -197,7 +206,7 @@ Dashboard → **Authentication** → **Providers** → **Email**:
 
 **Registration** (`src/components/auth/register-form.tsx`):
 
-1. Validates with `registerSchema` (zod) → `supabase.auth.signUp({ email, password, options.data: { full_name, phone, for_whom } })`.
+1. Validates with `registerSchema` (zod) → `supabase.auth.signUp({ email, password, options.data: { full_name, phone, for_whom }, options.emailRedirectTo: '<origin>/verify' })`.
 2. The `handle_new_user` trigger creates the `profiles` row immediately
    (works even while email confirmation is still pending).
 3. If a session already exists (email confirmation OFF), the form also upserts

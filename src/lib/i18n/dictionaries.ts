@@ -212,9 +212,12 @@ const en: Dict = {
   'register.success.body':
     'We have sent a confirmation link to your email address. Open it to activate your account, and then you can complete your profile.',
   'register.success.login': 'Go to login',
+  'register.success.waiting':
+    'Leave this page open — we will continue right here the moment you click the link in your inbox.',
   'register.done.title': 'Your account is ready',
   'register.done.body': 'You are signed in. You can start building your profile now.',
   'register.done.cta': 'Continue',
+  'register.done.redirecting': 'Taking you to your profile…',
   'register.haveAccount': 'Already have an account?',
   'register.login': 'Log in',
   'register.error.name': 'Enter the full name.',
@@ -524,9 +527,12 @@ const mr: Dict = {
   'register.success.body':
     'खाते सक्रिय करण्यासाठी आम्ही कन्फर्मेशन लिंक पाठवली आहे. ती उघडल्यानंतर तुमची प्रोफाइल पूर्ण करू शकता.',
   'register.success.login': 'लॉगिन पृष्ठावर जा',
+  'register.success.waiting':
+    'हे पान खुले ठेवा — इनबॉक्समधील लिंक क्लिक करताच आम्ही तुम्हाला येथून आपोआप पुढे नेऊ.',
   'register.done.title': 'तुमचे खाते तयार आहे',
   'register.done.body': 'तुम्ही साइन इन आहात. आता तुमच्या प्रोफाइलवर काम करू शकता.',
   'register.done.cta': 'पुढे जा',
+  'register.done.redirecting': 'तुम्हाला तुमच्या प्रोफाइलकडे नेत आहोत…',
   'register.haveAccount': 'आधीच खाते आहे?',
   'register.login': 'लॉगिन करा',
   'register.error.name': 'पूर्ण नाव टाका.',
