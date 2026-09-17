@@ -10,7 +10,6 @@ import {
   LayoutDashboard,
   Settings2,
   Star,
-  Trash2,
   Users,
 } from 'lucide-react'
 import { requireAdminPage } from '@/lib/admin/server'
@@ -28,7 +27,6 @@ const NAV = [
   { href: '/admin/featured', label: 'Featured', icon: Heart },
   { href: '/admin/stories', label: 'Stories', icon: Heart },
   { href: '/admin/matching', label: 'Matching', icon: Settings2 },
-  { href: '/admin/deletions', label: 'Deletions', icon: Trash2 },
 ]
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {

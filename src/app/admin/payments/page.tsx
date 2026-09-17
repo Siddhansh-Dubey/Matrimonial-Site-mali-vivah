@@ -47,9 +47,9 @@ export default async function AdminPaymentsPage() {
 
       <form action={manualActivate} className="flex flex-wrap items-end gap-2 rounded-2xl border border-gold-300 bg-gold-50/50 p-4">
         <span className="w-full text-xs font-bold uppercase tracking-wide text-gold-700">
-          Manual activation (recovery only)
+          Manual activation — paste the member&apos;s email, mobile or UUID
         </span>
-        <input name="user_id" placeholder="User UUID" required className="flex-1 rounded-full border border-stone-300 bg-white px-4 py-2 text-sm" />
+        <input name="user_id" placeholder="Email · mobile · User UUID" required className="flex-1 rounded-full border border-stone-300 bg-white px-4 py-2 text-sm" />
         <select name="package_id" required className="rounded-full border border-stone-300 bg-white px-4 py-2 text-sm" defaultValue="">
           <option value="" disabled>Package…</option>
           {(packages ?? []).map((p) => (

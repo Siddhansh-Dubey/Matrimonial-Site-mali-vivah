@@ -1,88 +1,85 @@
 'use client'
 
-import { useState } from 'react'
-import { Loader2, Trash2 } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
-import { isSupabaseConfigured } from '@/lib/env'
+import { useTransition, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { AlertTriangle, Loader2, Trash2 } from 'lucide-react'
+import { deleteMyAccount } from '@/app/profile/actions'
 
 /**
- * Account deletion REQUEST (per the PRD): the member files a request, the
- * profile is hidden immediately, and the admin completes destruction after a
- * cooling-off period. There is no self-serve irreversible delete — mistakes
- * must be reversible.
+ * Self-serve account deletion — DIRECT, no request and no admin queue.
+ * After the typed confirmation the server action erases the auth user, every
+ * cascading database row and all uploaded photos in one pass. Irreversible;
+ * that is exactly what the member asked for.
  */
 export function DeletionCard() {
   const [open, setOpen] = useState(false)
   const [confirm, setConfirm] = useState('')
-  const [reason, setReason] = useState('')
-  const [busy, setBusy] = useState(false)
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pending, startTransition] = useTransition()
+  const router = useRouter()
 
-  async function requestDeletion() {
-    if (!isSupabaseConfigured) return
-    setBusy(true)
+  function eraseAccount() {
+    if (confirm !== 'DELETE' || pending) return
     setError(null)
-    try {
-      const supabase = createClient()
-      const { error: rpcError } = await supabase.rpc('request_account_deletion', {
-        p_reason: reason.trim() || null,
-      })
-      if (rpcError) {
-        if (rpcError.message.includes('PENDING_REQUEST_EXISTS')) {
-          setError('A deletion request is already pending — our team is on it.')
-        } else {
-          setError(rpcError.message)
-        }
-        return
+    startTransition(async () => {
+      const result = await deleteMyAccount()
+      if (result.ok) {
+        setDone(true)
+        // The session is already dead — land on the login screen with a
+        // confirmation note rather than a refreshed (now inaccessible) profile.
+        router.replace('/login?deleted=1')
+      } else {
+        setError(result.error) // panel stays open so the message is visible
       }
-      setDone(true)
-    } catch {
-      setError('Something went wrong. Please try again.')
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   if (done) {
     return (
       <div className="card p-6">
-        <h2 className="font-display text-lg font-bold text-maroon">Deletion requested</h2>
+        <h2 className="font-display text-lg font-bold text-maroon">Account deleted</h2>
         <p className="mt-2 text-sm text-stone-600">
-          Your profile is now hidden from everyone. Our team will permanently delete your data and
-          confirm over email. Changed your mind? Contact support from the email on your account.
+          Everything tied to this account — profile, photos, matches and history — has been
+          permanently erased. We&apos;re sorry to see you go.
         </p>
       </div>
     )
   }
 
   return (
-    <div className="card border-stone-200 p-6">
-      <h2 className="font-display text-lg font-bold text-stone-800">Delete my account</h2>
+    <div className="card border-brand-200 p-6">
+      <h2 className="flex items-center gap-2 font-display text-lg font-bold text-brand-800">
+        <Trash2 className="h-5 w-5" aria-hidden />
+        Delete my account
+      </h2>
       {!open ? (
         <>
-          <p className="mt-2 text-xs text-stone-500">
-            Request permanent deletion. Your profile hides immediately; data is removed by our team
-            after verification.
+          <p className="mt-2 text-xs text-stone-600">
+            Permanently erases your profile, photos, matches and history from our database —
+            immediately, with no cooling-off period and no undo.
           </p>
           <button
             type="button"
             onClick={() => setOpen(true)}
             className="mt-4 inline-flex items-center gap-2 rounded-full border border-brand-300 px-4 py-2 text-xs font-bold text-brand-700 hover:bg-brand-50"
           >
-            <Trash2 className="h-4 w-4" /> Request account deletion
+            <AlertTriangle className="h-4 w-4" /> Delete my account now
           </button>
         </>
       ) : (
         <div className="mt-3 space-y-3">
-          <textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="Optional — why are you leaving?"
-            rows={2}
-            className="input w-full resize-none text-sm"
-            maxLength={1000}
-          />
+          <div className="rounded-xl border border-brand-200 bg-brand-50/60 p-3 text-xs leading-relaxed text-stone-700">
+            <p className="flex items-center gap-1.5 font-bold text-brand-700">
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden /> This cannot be undone
+            </p>
+            <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-stone-600">
+              <li>Your login, profile and partner preferences are removed.</li>
+              <li>All uploaded photos (profile, family, moments) are erased.</li>
+              <li>Interests, matches, blocks, reports you filed and history are deleted.</li>
+              <li>Paid time left on a package is forfeited — refunds go through support.</li>
+            </ul>
+          </div>
           <input
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
@@ -92,14 +89,23 @@ export function DeletionCard() {
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={requestDeletion}
-              disabled={busy || confirm !== 'DELETE'}
+              onClick={eraseAccount}
+              disabled={pending || confirm !== 'DELETE'}
               className="inline-flex items-center gap-2 rounded-full bg-brand-700 px-4 py-2 text-xs font-bold text-white hover:bg-brand-800 disabled:opacity-50"
             >
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-              Submit deletion request
+              {pending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              {pending ? 'Erasing everything…' : 'Yes, permanently delete my account'}
             </button>
-            <button type="button" onClick={() => setOpen(false)} className="btn-secondary !py-2 text-xs">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              disabled={pending}
+              className="btn-secondary !py-2 text-xs"
+            >
               Cancel
             </button>
           </div>

@@ -7,6 +7,7 @@ import { Eye, EyeOff, Heart, Lock, Mail, Phone, ShieldCheck, Sparkles, Users } f
 import { useI18n } from '@/lib/i18n/provider'
 import { isSupabaseConfigured } from '@/lib/env'
 import { lastTenDigits, loginSchema } from '@/lib/auth/login-schema'
+import { signInWithMobile } from '@/app/login/actions'
 
 type FieldErrors = {
   email?: string
@@ -61,9 +62,10 @@ export function LoginForm() {
       const next: FieldErrors = {}
       for (const issue of parsed.error.issues) {
         const field = issue.path[0]
-        if (field === 'email') next.email = t('login.error.email')
-        if (field === 'mobile') next.mobile = t('login.error.mobile')
-        if (field === 'password') next.password = t('login.error.password')
+        if (issue.message === 'identifier-required') next.email = t('login.error.identifier')
+        else if (field === 'email') next.email = t('login.error.email')
+        else if (field === 'mobile') next.mobile = t('login.error.mobile')
+        else if (field === 'password') next.password = t('login.error.password')
       }
       setFieldErrors(next)
       return
@@ -75,6 +77,26 @@ export function LoginForm() {
     try {
       if (!isSupabaseConfigured) {
         setFormError(t('login.error.env'))
+        return
+      }
+
+      // Mobile-only sign-in: resolve + authenticate server-side so the stored
+      // email never has to round-trip through the browser.
+      if (!parsed.data.email) {
+        const result = await signInWithMobile(parsed.data.mobile, parsed.data.password)
+        if (!result.ok) {
+          setFormError(
+            t(result.error === 'unavailable' ? 'login.error.env' : 'login.error.mobileGeneric')
+          )
+          return
+        }
+        if (remember) {
+          window.localStorage.setItem('mali-vivah:remember-email', result.email)
+        } else {
+          window.localStorage.removeItem('mali-vivah:remember-email')
+        }
+        router.push('/profile')
+        router.refresh()
         return
       }
 
@@ -104,7 +126,9 @@ export function LoginForm() {
         (typeof data.user.user_metadata?.mobile === 'string' ? data.user.user_metadata.mobile : '')
 
       const storedDigits = lastTenDigits(profile?.mobile ?? metaPhone)
-      if (storedDigits && storedDigits !== parsed.data.mobile) {
+      // The mobile double-check only applies when one was typed — an email ID
+      // on its own is a complete identity now.
+      if (parsed.data.mobile && storedDigits && storedDigits !== parsed.data.mobile) {
         await supabase.auth.signOut()
         setFormError(t('login.error.mismatch'))
         return
@@ -231,12 +255,14 @@ export function LoginForm() {
             <div className="text-center">
               <h2 className="font-display text-3xl font-bold text-stone-900">{t('login.title')}</h2>
               <p className="mt-2 text-sm leading-relaxed text-stone-600">{t('login.subtitle')}</p>
+              <p className="mt-1.5 text-xs font-medium text-brand-700/80">{t('login.identifier.hint')}</p>
             </div>
 
             <form className="mt-8 space-y-5" onSubmit={onSubmit} noValidate>
               <div>
                 <label htmlFor="login-email" className="label">
                   {t('login.email')}
+                  <span className="ml-1.5 text-[11px] font-normal text-stone-400">({t('login.optional')})</span>
                 </label>
                 <div className="relative">
                   <Mail className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" aria-hidden />
@@ -261,9 +287,21 @@ export function LoginForm() {
                 )}
               </div>
 
+              <div className="relative py-1">
+                <div aria-hidden className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-stone-200" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="bg-white px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-stone-400">
+                    {t('login.or')}
+                  </span>
+                </div>
+              </div>
+
               <div>
                 <label htmlFor="login-mobile" className="label">
                   {t('login.mobile')}
+                  <span className="ml-1.5 text-[11px] font-normal text-stone-400">({t('login.optional')})</span>
                 </label>
                 <div className="relative flex">
                   <span className="inline-flex items-center gap-1.5 rounded-l-xl border border-r-0 border-stone-300 bg-stone-50 px-3 text-sm font-medium text-stone-600">

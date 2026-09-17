@@ -9,12 +9,54 @@
  * Client components/users can never reach these — they are server-only.
  */
 import { revalidatePath } from 'next/cache'
-import { audit, requireAdminAction } from '@/lib/admin/server'
+import { audit, requireAdminAction, type AdminContext } from '@/lib/admin/server'
 import type { Json } from '@/lib/supabase/database.types'
 
 function str(fd: FormData, key: string): string {
   const v = fd.get(key)
   return typeof v === 'string' ? v.trim() : ''
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+type AdminClient = AdminContext['admin']
+
+/**
+ * Resolve whatever the admin pasted from a member row to a real profile id:
+ * a UUID, an email, a mobile (with or without the stored "12345 67890"
+ * spacing), or the full "email · mobile" label copied straight off the
+ * Members list. Throws a human-readable error instead of a raw Postgres
+ * "invalid input syntax for type uuid" when nothing matches.
+ */
+async function resolveMemberId(admin: AdminClient, raw: string): Promise<string> {
+  const value = raw.trim()
+  if (!value) throw new Error('Member identifier is required')
+
+  const candidates: { col: 'id' | 'email' | 'mobile'; val: string }[] = []
+  const consider = (candidate: string) => {
+    const c = candidate.trim()
+    if (!c) return
+    if (UUID_RE.test(c)) candidates.push({ col: 'id', val: c })
+    else if (c.includes('@')) candidates.push({ col: 'email', val: c.toLowerCase() })
+    const digits = c.replace(/\D/g, '')
+    if (/^\d{10}$/.test(digits)) {
+      candidates.push({ col: 'mobile', val: digits })
+      candidates.push({ col: 'mobile', val: `${digits.slice(0, 5)} ${digits.slice(5)}` })
+    }
+  }
+
+  consider(value)
+  // "email · mobile · joined 12 Jun 2026" → first segment is the email.
+  const firstSegment = value.split('·')[0]
+  if (firstSegment && firstSegment.trim() !== value) consider(firstSegment)
+
+  for (const cand of candidates) {
+    const { data } = await admin.from('profiles').select('id').eq(cand.col, cand.val).maybeSingle()
+    if (data?.id) return data.id
+  }
+  throw new Error(
+    `No member matches "${value}". Use the email, mobile number or profile UUID shown on the Members page.`
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -182,13 +224,18 @@ export async function updatePackage(formData: FormData) {
 // Payments
 // ---------------------------------------------------------------------------
 
-/** Manually activate a member's membership for a package (recovery path). */
+/**
+ * Manually activate a member's membership for a package (recovery path and
+ * test tooling). The identifier field deliberately accepts anything copied
+ * from a member row — UUID, email, mobile or "email · mobile" — resolved
+ * via resolveMemberId() before hitting the activation RPC.
+ */
 export async function manualActivate(formData: FormData) {
   const ctx = await requireAdminAction()
-  const targetUserId = str(formData, 'user_id')
   const packageId = Number(str(formData, 'package_id'))
   const note = str(formData, 'note')
-  if (!targetUserId || !Number.isFinite(packageId)) throw new Error('user_id + package_id required')
+  if (!Number.isFinite(packageId)) throw new Error('Choose a package')
+  const targetUserId = await resolveMemberId(ctx.admin, str(formData, 'user_id'))
   const { admin } = ctx
   const { data, error } = await admin.rpc('activate_membership', {
     p_user_id: targetUserId,
@@ -197,6 +244,7 @@ export async function manualActivate(formData: FormData) {
   if (error) throw new Error(error.message)
   await audit(ctx, 'manual_activation', 'user', targetUserId, { package_id: packageId, note, result: data })
   revalidatePath('/admin/payments')
+  revalidatePath('/admin/members')
 }
 
 /** Mark a payment refunded (revokes the subscription). */
@@ -333,39 +381,7 @@ export async function deleteStory(formData: FormData) {
   revalidatePath('/success-stories')
 }
 
-// ---------------------------------------------------------------------------
-// Account deletion requests
-// ---------------------------------------------------------------------------
-
-/** Permanently delete the member (auth user + cascade) and close the request. */
-export async function processDeletion(formData: FormData) {
-  const ctx = await requireAdminAction()
-  const requestId = Number(str(formData, 'request_id'))
-  const targetUserId = str(formData, 'user_id')
-  if (!Number.isFinite(requestId) || !targetUserId) throw new Error('request_id and user_id required')
-  const { admin } = ctx
-  // Delete the auth user — cascades profiles, matrimony_profiles, photos rows,
-  // interests, payments rows… everything keyed on the user id.
-  const { error: delErr } = await admin.auth.admin.deleteUser(targetUserId)
-  if (delErr) throw new Error(delErr.message)
-  await admin
-    .from('account_deletion_requests')
-    .update({ status: 'processed', processed_at: new Date().toISOString() })
-    .eq('id', requestId)
-  await audit(ctx, 'account_deleted', 'user', targetUserId, { request_id: requestId })
-  revalidatePath('/admin/deletions')
-  revalidatePath('/admin')
-}
-
-export async function cancelDeletion(formData: FormData) {
-  const ctx = await requireAdminAction()
-  const requestId = Number(str(formData, 'request_id'))
-  const { admin } = ctx
-  const { error } = await admin
-    .from('account_deletion_requests')
-    .update({ status: 'cancelled' })
-    .eq('id', requestId)
-  if (error) throw new Error(error.message)
-  await audit(ctx, 'account_deletion_cancelled', 'account_deletion_request', String(requestId))
-  revalidatePath('/admin/deletions')
-}
+// NOTE: the old "account deletion request queue" lived here. Members now
+// delete their own account directly via the server action in
+// src/app/profile/actions.ts, so admins no longer process anything — and no
+// half-deleted "pending request" state can exist in between.

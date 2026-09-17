@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { FormEvent, useMemo, useState } from 'react'
-import { BadgeCheck, Eye, EyeOff, Heart, Lock, Mail, Phone, ShieldCheck, Sparkles, User } from 'lucide-react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { BadgeCheck, Eye, EyeOff, Heart, Loader2, Lock, Mail, Phone, ShieldCheck, Sparkles, User } from 'lucide-react'
 import { useI18n } from '@/lib/i18n/provider'
 import { isSupabaseConfigured } from '@/lib/env'
 import { forWhomOptions, registerSchema, type ForWhom } from '@/lib/auth/register-schema'
@@ -28,6 +29,7 @@ type SuccessState =
 
 export function RegisterForm() {
   const { t } = useI18n()
+  const router = useRouter()
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -99,7 +101,12 @@ export function RegisterForm() {
             phone: parsed.data.mobile,
             for_whom: parsed.data.forWhom,
           },
-          emailRedirectTo: window.location.origin,
+          // Supabase lands the member on /verify after they click the
+          // confirmation link — that page establishes the session and
+          // forwards to My Profile. (Must be allow-listed in Dashboard →
+          // Authentication → URL Configuration → Redirect URLs, otherwise
+          // Supabase falls back to the Site URL/homepage.)
+          emailRedirectTo: `${window.location.origin}/verify`,
         },
       })
 
@@ -156,6 +163,44 @@ export function RegisterForm() {
     }
   }
 
+  // Auto-continue in THIS tab once the email is confirmed. When the member
+  // clicks the link (usually a new tab of the same browser), that tab stores
+  // the session for this origin; this poll picks it up seconds later and
+  // finishes the flow right where they started — on the profile page.
+  // A confirmation opened on another device still works via the /verify page.
+  useEffect(() => {
+    if (success?.kind !== 'verify-email' || !isSupabaseConfigured) return
+    let cancelled = false
+    let timer = 0
+    void (async () => {
+      const { createClient } = await import('@/lib/supabase/client')
+      const supabase = createClient()
+      const check = async () => {
+        const { data } = await supabase.auth.getSession()
+        if (cancelled) return
+        if (data.session) {
+          setSuccess({ kind: 'done' })
+          router.replace('/profile?joined=1')
+        } else {
+          timer = window.setTimeout(check, 2000)
+        }
+      }
+      await check()
+    })()
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [success, router])
+
+  // Confirmation disabled on the project (session returned instantly):
+  // pause on the "ready" card briefly, then go to profile setup too.
+  useEffect(() => {
+    if (success?.kind !== 'done') return
+    const id = window.setTimeout(() => router.replace('/profile?joined=1'), 1800)
+    return () => window.clearTimeout(id)
+  }, [success, router])
+
   if (success) {
     const finished = success.kind === 'done'
     return (
@@ -173,9 +218,17 @@ export function RegisterForm() {
           {!finished && (
             <p className="mt-3 break-words text-sm font-semibold text-stone-800">{success.email}</p>
           )}
-          <Link href={finished ? '/profile' : '/login'} className="btn-primary mt-8 w-full">
+          <Link href={finished ? '/profile?joined=1' : '/login'} className="btn-primary mt-8 w-full">
             {t(finished ? 'register.done.cta' : 'register.success.login')}
           </Link>
+          {finished ? (
+            <p className="mt-3 text-xs text-stone-500">{t('register.done.redirecting')}</p>
+          ) : (
+            <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-stone-500">
+              <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden />
+              {t('register.success.waiting')}
+            </p>
+          )}
         </div>
       </div>
     )

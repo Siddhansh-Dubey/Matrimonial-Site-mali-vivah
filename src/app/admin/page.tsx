@@ -1,4 +1,4 @@
-import { Activity, BadgeCheck, Banknote, FileWarning, Flame, Heart, Rocket, ShieldBan, Trash2, Users } from 'lucide-react'
+import { Activity, BadgeCheck, Banknote, FileWarning, Flame, Heart, Rocket, ShieldBan, Users } from 'lucide-react'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdminPage } from '@/lib/admin/server'
 
@@ -29,7 +29,6 @@ export default async function AdminDashboard() {
     revenueMonthRows,
     openReports,
     pendingVerifications,
-    pendingDeletions,
     liveMoments,
     activeBoosts,
     auditRows,
@@ -45,7 +44,6 @@ export default async function AdminDashboard() {
       .gte('created_at', monthStart.toISOString()),
     count('reports', (q) => q.in('status', ['open', 'reviewing'])),
     count('verification_requests', (q) => q.eq('status', 'pending')),
-    count('account_deletion_requests', (q) => q.eq('status', 'pending')),
     count('moments', (q) => q.eq('is_removed', false).gt('expires_at', new Date().toISOString())),
     count('profile_boosts', (q) => q.eq('status', 'active')),
     admin.from('admin_audit_log').select('*').order('created_at', { ascending: false }).limit(20),
@@ -64,7 +62,6 @@ export default async function AdminDashboard() {
     { label: 'Revenue this month', value: `₹${revenueMonth.toLocaleString('en-IN')}`, icon: Banknote, href: '/admin/payments' },
     { label: 'Open reports', value: openReports, icon: FileWarning, href: '/admin/reports' },
     { label: 'Pending verifications', value: pendingVerifications, icon: BadgeCheck, href: '/admin/verification' },
-    { label: 'Pending deletions', value: pendingDeletions, icon: Trash2, href: '/admin/deletions' },
     { label: 'Live moments', value: liveMoments, icon: Flame, href: '/admin/moments' },
     { label: 'Active boosts', value: activeBoosts, icon: ShieldBan, href: '/admin/featured' },
   ]

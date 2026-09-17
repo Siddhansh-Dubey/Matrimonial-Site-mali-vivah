@@ -30,7 +30,7 @@ export const dynamic = 'force-dynamic'
 export default async function ProfileDashboardPage({
   searchParams,
 }: {
-  searchParams?: { published?: string }
+  searchParams?: { published?: string; joined?: string }
 }) {
   if (!isSupabaseConfigured) redirect('/login')
 
@@ -63,6 +63,7 @@ export default async function ProfileDashboardPage({
     profilePhotos.find((p) => p.is_primary)?.storage_path ?? profilePhotos[0]?.storage_path ?? null
   const age = ageFromDate(mp?.date_of_birth)
   const published = searchParams?.published === '1'
+  const joined = searchParams?.joined === '1'
   const visibility = visibilityRes.data as VisibilityReason | null
   const hasBoost = boostRes
 
@@ -84,6 +85,18 @@ export default async function ProfileDashboardPage({
   return (
     <section className="bg-cream">
       <div className="container-page py-10 sm:py-14">
+        {/* Fresh from sign-up/verification — point straight at profile setup. */}
+        {joined && (
+          <div className="mx-auto mb-6 flex max-w-3xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
+            <Check className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" aria-hidden />
+            <span>
+              <span className="font-bold">Welcome, {fullName} — your email is verified.</span>{' '}
+              Finish the checklist below and press Publish to go live: the sooner the profile is
+              complete, the sooner families can find you.
+            </span>
+          </div>
+        )}
+
         {published && visibility?.is_public && (
           <div className="mx-auto mb-6 flex max-w-3xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
             <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
