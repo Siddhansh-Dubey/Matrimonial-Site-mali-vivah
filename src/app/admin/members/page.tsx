@@ -1,6 +1,6 @@
 import { BadgeCheck, Ban, Rocket, Star } from 'lucide-react'
 import { requireAdminPage } from '@/lib/admin/server'
-import { setFeatured, setProfileSuspended, setProfileVerified } from '@/app/admin/actions'
+import { manualActivate, setFeatured, setProfileSuspended, setProfileVerified } from '@/app/admin/actions'
 
 export const metadata = { title: 'Admin · Members' }
 export const dynamic = 'force-dynamic'
@@ -23,7 +23,7 @@ export default async function AdminMembersPage({ searchParams }: Props) {
 
   const ids = (rows ?? []).map((r) => r.id)
   const emptyId = '00000000-0000-0000-0000-000000000000'
-  const [mps, subs, feats] = await Promise.all([
+  const [mps, subs, feats, pkgs] = await Promise.all([
     admin
       .from('matrimony_profiles')
       .select('user_id, status, gender, city, verified_at')
@@ -38,10 +38,16 @@ export default async function AdminMembersPage({ searchParams }: Props) {
       .from('featured_profiles')
       .select('profile_id')
       .in('profile_id', ids.length ? ids : [emptyId]),
+    admin
+      .from('packages')
+      .select('id, name, duration_days')
+      .eq('is_active', true)
+      .order('sort_order'),
   ])
   const mpBy = new Map((mps.data ?? []).map((m) => [m.user_id, m]))
   const subBy = new Map((subs.data ?? []).map((s) => [s.user_id, s]))
   const featSet = new Set((feats.data ?? []).map((f) => f.profile_id))
+  const packages = pkgs.data ?? []
 
   return (
     <div className="space-y-6">
@@ -100,6 +106,32 @@ export default async function AdminMembersPage({ searchParams }: Props) {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
+                  {packages.length > 0 && (
+                    <form
+                      action={manualActivate}
+                      className="flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50/50 p-1"
+                      title="Grant a paid membership (activates the profile; renewals stack)"
+                    >
+                      <input type="hidden" name="user_id" value={p.id} />
+                      <select
+                        name="package_id"
+                        aria-label={`Package for ${p.full_name}`}
+                        className="rounded-full border-0 bg-transparent py-0.5 pl-2 pr-1 text-xs font-semibold text-emerald-800 focus:outline-none"
+                      >
+                        {packages.map((pk) => (
+                          <option key={pk.id} value={pk.id}>
+                            {pk.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="submit"
+                        className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-700"
+                      >
+                        {sub ? 'Extend' : 'Mark paid'}
+                      </button>
+                    </form>
+                  )}
                   <form action={setProfileVerified}>
                     <input type="hidden" name="user_id" value={p.id} />
                     <input type="hidden" name="verify" value={mp?.verified_at ? 'false' : 'true'} />
@@ -137,8 +169,9 @@ export default async function AdminMembersPage({ searchParams }: Props) {
       </ul>
 
       <p className="flex items-center gap-2 text-xs text-stone-400">
-        <Rocket className="h-3.5 w-3.5" /> Membership changes happen in Payments (manual activate /
-        refund); here you manage visibility, verification and featuring.
+        <Rocket className="h-3.5 w-3.5" /> Mark a member paid right from their row; refunds and
+        paste-by-identifier recovery live in Payments. Here you manage visibility, verification and
+        featuring.
       </p>
     </div>
   )
