@@ -15,9 +15,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { isSupabaseConfigured } from '@/lib/env'
 
-export type MobileSignInResult =
-  | { ok: true; email: string }
-  | { ok: false; error: 'invalid' | 'unavailable' }
+export type MobileSignInResult = { ok: true } | { ok: false; error: 'invalid' | 'unavailable' }
 
 export async function signInWithMobile(
   mobileDigits: string,
@@ -49,9 +47,9 @@ export async function signInWithMobile(
     // Non-fatal: a logging failure must never block a successful sign-in.
     await supabase.rpc('record_login').then(() => undefined, () => undefined)
 
-    // Returned so the form can keep its "remember me" convenience — it is the
-    // signer-in member's own address, never shown to anyone else.
-    return { ok: true, email: member.email }
+    // Deliberately returns nothing else: the account's stored email is never
+    // handed to the browser. "Remember me" keeps the mobile the member typed.
+    return { ok: true }
   } catch {
     return { ok: false, error: 'unavailable' }
   }

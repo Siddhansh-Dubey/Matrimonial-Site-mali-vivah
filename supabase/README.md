@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Ten migrations, run in filename order:
+Seventeen migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -47,6 +47,30 @@ Migrations 7–10 are the **Phase 1 completion pass** (database foundation):
 10. `20260915030000_notifications.sql` — the `notifications` table behind the
     navbar bell, with column-level grants so a member can flip `is_read` but
     can never insert a notification or rewrite its title.
+
+Migrations 11–17 complete the platform (visibility, payments, safety,
+engagement, activity, messaging):
+
+11. `20260915100000_visibility.sql` — `has_live_membership()` (the time-aware
+    paid check), `is_profile_public()`, `profile_visibility_reason()` and the
+    membership-expiry sweeps. This is where the "free ⇒ hidden" rule lives.
+12. `20260915110000_payments.sql` — Razorpay `payments`, the single
+    `activity_events` stream, and the subscriptions **lockdown** (the browser
+    can no longer INSERT/UPDATE `subscriptions`).
+13. `20260915120000_safety_interests.sql` — `blocks` / `reports`,
+    `is_blocked()`, `express_interest()` (the only interest-write path),
+    hardened interest UPDATE policies, and account-deletion requests.
+14. `20260915130000_engagement_admin.sql` — Daily 5 matches, boosts, featured
+    profiles, verification requests, Mali Moments, success stories, admin.
+15. `20260915140000_activity_login_register.sql` — registration + login events
+    folded into the same activity stream.
+16. `20260917000000_notification_enum_message_received.sql` — adds
+    `message_received` to `notification_type`. Own file for the same
+    PostgreSQL reason as #7: a new enum value cannot be *used* in the
+    transaction that creates it, and migration 17 uses it. **Do not merge.**
+17. `20260917010000_chat.sql` — in-app messaging: `conversations`,
+    `conversation_members`, `messages`, their RLS, the ten chat RPCs, the
+    triggers and the Realtime publication. Details below.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's
@@ -317,6 +341,73 @@ automatically; the stepper is clickable so any section can be revisited. The
 fallback (no stored progress, e.g. a new device) infers the resume point from
 the saved data — Basic → Education → About — and a fully-published profile
 opens at Basic for review.
+
+## In-app messaging (migrations 16–17)
+
+Messaging is a **paid, mutual-connection** feature and every rule below is
+enforced in the database, not in the UI.
+
+**Tables**
+
+| Table | Purpose |
+|---|---|
+| `conversations` | one row per pair — `member_a < member_b`, `UNIQUE (member_a, member_b)`, self-pairs refused |
+| `conversation_members` | the two participants; also the RLS anchor |
+| `messages` | text only (1–2000 chars) + `read_at`. No phone, email or address column exists |
+
+**Who may do what**
+
+* A conversation can be created (`get_or_create_conversation`) only when the
+  caller is signed in, **both** members hold a live plan
+  (`has_live_membership`), interest is **mutual** (`mutual_interest_exists`)
+  and neither has blocked the other (`is_blocked`). Payment alone never opens
+  a chat.
+* A message can be sent (`send_message`) only under the same conditions — they
+  are re-checked on **every** send, so an expired plan or a fresh block stops
+  messaging immediately. `sender_id` is always `auth.uid()`.
+* Reads (`chat_inbox`, `get_conversation`, `list_messages`) require the caller
+  to be a participant **and** to hold a live plan. History is never deleted:
+  an expired member simply cannot open chat, and a renewal restores access.
+* `mark_conversation_read` / `unread_message_count` keep the read state in
+  `messages`, independent of the notification feed.
+
+**Why a malicious client cannot cheat**
+
+* The three tables grant **SELECT only** to `authenticated`. There is no
+  INSERT/UPDATE/DELETE policy or grant at all, so a hand-crafted REST call
+  cannot create a conversation, join one, send a message or flip a read flag.
+  The only write path is the SECURITY DEFINER RPCs, and each re-verifies
+  `auth.uid()`, membership, mutual interest, blocks and participation. No
+  client-supplied value (`isPaid`, `sender_id`, a conversation id) is trusted.
+* RLS on top: members see only their own `conversation_members` rows, only
+  conversations they participate in, and only those conversations' messages.
+* `chat_eligibility()` returns a deliberately coarse verdict
+  (`ok` / `membership_required` / `unavailable`), so the endpoint cannot be
+  used to discover who has an account, who is paid, or who blocked whom.
+* Exactly one conversation per pair: the ordered unique pair makes duplicate
+  "start chat" presses collapse onto the same row (race-safe via
+  `ON CONFLICT`), and `CHECK (member_a <> member_b)` forbids self-chat.
+
+**Notifications** reuse the existing bell — the `messages` INSERT trigger calls
+`push_notification()` with type `message_received`, title *"New message"* and
+body *"You have a new message from &lt;name&gt;."* The **message body is never
+stored in the notification**, metadata holds only `conversation_id` /
+`sender_id`, and `push_notification()` additionally scrubs any
+phone/email/contact/address/password/token key. One unread notification per
+conversation keeps an active exchange from flooding the feed. `link` is
+`/messages?c=<conversation id>`, so a click opens that thread.
+
+**Realtime.** The migration adds `messages` and `conversations` to the
+`supabase_realtime` publication (guarded, so it is a no-op on a project
+without one). The app treats a Realtime event purely as a *wake-up signal* and
+re-reads through the authorised RPCs — so live delivery works even if a
+project's Realtime RLS enforcement is switched off, and the browser never
+renders a row it was not entitled to read. No polling is used.
+
+> **Optional hardening (Dashboard).** Database → Realtime: confirm
+> `public.messages` and `public.conversations` are listed, and enable RLS
+> enforcement for them if your project exposes that toggle. Nothing in the app
+> depends on it, because the payloads are never rendered directly.
 
 ## Useful admin queries (matchmaking)
 
