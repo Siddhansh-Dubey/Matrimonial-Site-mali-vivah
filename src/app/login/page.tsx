@@ -4,7 +4,7 @@ import { LoginForm } from '@/components/auth/login-form'
 
 export const metadata: Metadata = {
   title: 'Login',
-  description: 'Sign in to Mali Vivah using your email ID, mobile number and password.',
+  description: 'Sign in to Mali Vivah with your email ID or mobile number and password.',
 }
 
 export default function LoginPage({

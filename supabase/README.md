@@ -214,9 +214,16 @@ Dashboard → **Authentication** → **Providers** → **Email**:
 
 **Login** (`src/components/auth/login-form.tsx`):
 
-1. Validates with `loginSchema` → `supabase.auth.signInWithPassword({ email, password })`.
-2. Compares the typed mobile against `profiles.mobile` (falling back to the
-   auth metadata for pre-migration accounts); mismatch → sign out + error.
+1. Validates with `loginSchema` — **email OR mobile** (at least one) +
+   password. Email sign-in → `supabase.auth.signInWithPassword({ email, password })`.
+   Mobile-only sign-in → `signInWithMobile` server action
+   (`src/app/login/actions.ts`): the service role resolves the account from
+   the UNIQUE `profiles.mobile` and signs in server-side, so the stored email
+   never round-trips the browser and unknown numbers are indistinguishable
+   from wrong passwords.
+2. When a mobile is typed alongside the email it must match `profiles.mobile`
+   (falling back to the auth metadata for pre-migration accounts); mismatch →
+   sign out + error.
 3. Self-heals a missing profile row / missing mobile from sign-up metadata.
 4. Calls `record_login()` RPC for the audit trail (never blocks login).
 5. Redirects to `/profile` (the dashboard) — the entry point of the
