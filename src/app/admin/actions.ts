@@ -333,39 +333,7 @@ export async function deleteStory(formData: FormData) {
   revalidatePath('/success-stories')
 }
 
-// ---------------------------------------------------------------------------
-// Account deletion requests
-// ---------------------------------------------------------------------------
-
-/** Permanently delete the member (auth user + cascade) and close the request. */
-export async function processDeletion(formData: FormData) {
-  const ctx = await requireAdminAction()
-  const requestId = Number(str(formData, 'request_id'))
-  const targetUserId = str(formData, 'user_id')
-  if (!Number.isFinite(requestId) || !targetUserId) throw new Error('request_id and user_id required')
-  const { admin } = ctx
-  // Delete the auth user — cascades profiles, matrimony_profiles, photos rows,
-  // interests, payments rows… everything keyed on the user id.
-  const { error: delErr } = await admin.auth.admin.deleteUser(targetUserId)
-  if (delErr) throw new Error(delErr.message)
-  await admin
-    .from('account_deletion_requests')
-    .update({ status: 'processed', processed_at: new Date().toISOString() })
-    .eq('id', requestId)
-  await audit(ctx, 'account_deleted', 'user', targetUserId, { request_id: requestId })
-  revalidatePath('/admin/deletions')
-  revalidatePath('/admin')
-}
-
-export async function cancelDeletion(formData: FormData) {
-  const ctx = await requireAdminAction()
-  const requestId = Number(str(formData, 'request_id'))
-  const { admin } = ctx
-  const { error } = await admin
-    .from('account_deletion_requests')
-    .update({ status: 'cancelled' })
-    .eq('id', requestId)
-  if (error) throw new Error(error.message)
-  await audit(ctx, 'account_deletion_cancelled', 'account_deletion_request', String(requestId))
-  revalidatePath('/admin/deletions')
-}
+// NOTE: the old "account deletion request queue" lived here. Members now
+// delete their own account directly via the server action in
+// src/app/profile/actions.ts, so admins no longer process anything — and no
+// half-deleted "pending request" state can exist in between.

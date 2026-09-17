@@ -35,7 +35,10 @@ SQL Editor → test register/login.
 - **Admin panel at `/admin`** — RBAC via `profiles.is_admin`, every mutation is a
   server action audited into `admin_audit_log`: members, verification queue,
   packages & pricing, payments (refund / manual recovery), reports, moments
-  moderation, featured curation, stories, matching config, account deletions.
+  moderation, featured curation, stories, matching config.
+- **Account deletion is self-serve and immediate** — no request queue: the
+  member's profile page wipes the auth user, every cascading row and all
+  uploaded photos in one shot (`src/app/profile/actions.ts`).
 
 ## Promoting the first admin
 
