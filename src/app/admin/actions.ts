@@ -334,9 +334,20 @@ export async function saveStory(formData: FormData) {
   const photoPath = str(formData, 'photo_path') || null
   const weddingDate = str(formData, 'wedding_date') || null
   const isPublished = str(formData, 'is_published') === 'true'
+  const ratingRaw = str(formData, 'rating')
+  const rating = ratingRaw ? Number(ratingRaw) : null
+  const milestone = str(formData, 'milestone') || null
+  const futureMembersNote = str(formData, 'future_members_note') || null
+
   if (!coupleNames || !title || !story) throw new Error('couple_names, title and story are required')
   const { admin } = ctx
   if (id) {
+    const { data: prevStory } = await admin
+      .from('success_stories')
+      .select('submitted_by, is_published')
+      .eq('id', id)
+      .maybeSingle()
+
     const { error } = await admin
       .from('success_stories')
       .update({
@@ -346,10 +357,28 @@ export async function saveStory(formData: FormData) {
         photo_path: photoPath,
         wedding_date: weddingDate,
         is_published: isPublished,
+        rating: rating && rating >= 1 && rating <= 5 ? rating : null,
+        milestone,
+        future_members_note: futureMembersNote,
       })
       .eq('id', id)
     if (error) throw new Error(error.message)
-    await audit(ctx, 'story_update', 'success_story', id)
+
+    // Notify submitter if transition from unpublished to published
+    if (isPublished && !prevStory?.is_published && prevStory?.submitted_by) {
+      await admin
+        .rpc('push_notification', {
+          p_user_id: prevStory.submitted_by,
+          p_type: 'admin_message',
+          p_title: 'Your Success Story has been published!',
+          p_message: 'Your journey is now live in Success Stories and inspiring couples across the community.',
+          p_metadata: {},
+          p_link: '/success-stories',
+        })
+        .then(() => undefined, () => undefined)
+    }
+
+    await audit(ctx, 'story_update', 'success_story', id, { is_published: isPublished })
   } else {
     const { data, error } = await admin
       .from('success_stories')
@@ -360,6 +389,9 @@ export async function saveStory(formData: FormData) {
         photo_path: photoPath,
         wedding_date: weddingDate,
         is_published: isPublished,
+        rating: rating && rating >= 1 && rating <= 5 ? rating : null,
+        milestone,
+        future_members_note: futureMembersNote,
       })
       .select('id')
       .single()
@@ -368,17 +400,101 @@ export async function saveStory(formData: FormData) {
   }
   revalidatePath('/admin/stories')
   revalidatePath('/success-stories')
+  revalidatePath('/success-stories/submit')
+}
+
+export async function publishStory(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const id = str(formData, 'id')
+  if (!id) throw new Error('Story id is required')
+  const { admin } = ctx
+
+  const { data: story, error: fetchErr } = await admin
+    .from('success_stories')
+    .select('id, submitted_by, is_published')
+    .eq('id', id)
+    .single()
+  if (fetchErr || !story) throw new Error('Story not found')
+
+  const { error } = await admin
+    .from('success_stories')
+    .update({ is_published: true })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+
+  if (story.submitted_by && !story.is_published) {
+    await admin
+      .rpc('push_notification', {
+        p_user_id: story.submitted_by,
+        p_type: 'admin_message',
+        p_title: 'Your Success Story has been published!',
+        p_message: 'Your journey is now live in Success Stories and inspiring couples across the community.',
+        p_metadata: {},
+        p_link: '/success-stories',
+      })
+      .then(() => undefined, () => undefined)
+  }
+
+  await audit(ctx, 'story_publish', 'success_story', id)
+  revalidatePath('/admin/stories')
+  revalidatePath('/success-stories')
+  revalidatePath('/success-stories/submit')
+}
+
+export async function unpublishStory(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const id = str(formData, 'id')
+  if (!id) throw new Error('Story id is required')
+  const { admin } = ctx
+
+  const { error } = await admin
+    .from('success_stories')
+    .update({ is_published: false })
+    .eq('id', id)
+  if (error) throw new Error(error.message)
+
+  await audit(ctx, 'story_unpublish', 'success_story', id)
+  revalidatePath('/admin/stories')
+  revalidatePath('/success-stories')
+  revalidatePath('/success-stories/submit')
 }
 
 export async function deleteStory(formData: FormData) {
   const ctx = await requireAdminAction()
   const id = str(formData, 'id')
   const { admin } = ctx
+
+  const { data: story } = await admin
+    .from('success_stories')
+    .select('submitted_by, is_published, photo_path')
+    .eq('id', id)
+    .maybeSingle()
+
   const { error } = await admin.from('success_stories').delete().eq('id', id)
   if (error) throw new Error(error.message)
+
+  // Optionally clean up photo if uploaded
+  if (story?.photo_path) {
+    await admin.storage.from('profile-photos').remove([story.photo_path]).catch(() => undefined)
+  }
+
+  if (story?.submitted_by && !story.is_published) {
+    await admin
+      .rpc('push_notification', {
+        p_user_id: story.submitted_by,
+        p_type: 'admin_message',
+        p_title: 'Success Story update',
+        p_message: 'Your success story submission could not be approved for publication at this time.',
+        p_metadata: {},
+        p_link: '/success-stories',
+      })
+      .then(() => undefined, () => undefined)
+  }
+
   await audit(ctx, 'story_delete', 'success_story', id)
   revalidatePath('/admin/stories')
   revalidatePath('/success-stories')
+  revalidatePath('/success-stories/submit')
 }
 
 // NOTE: the old "account deletion request queue" lived here. Members now

@@ -47,12 +47,14 @@ export function PurchaseButton({
   priceInr,
   featured = false,
   hasActive = false,
+  next,
 }: {
   packageId: number
   packageSlug: string
   priceInr: number
   featured?: boolean
   hasActive?: boolean
+  next?: string
 }) {
   const router = useRouter()
   const [state, setState] = useState<'idle' | 'loading' | 'verifying'>('idle')
@@ -132,7 +134,11 @@ export function PurchaseButton({
               body: JSON.stringify(response),
             })
             if (verifyRes.ok) {
-              router.push('/packages?payment=success')
+              if (next) {
+                router.push(next)
+              } else {
+                router.push('/packages?payment=success')
+              }
               router.refresh()
             } else {
               const body = (await verifyRes.json()) as { error?: string }
@@ -147,7 +153,7 @@ export function PurchaseButton({
         modal: {
           ondismiss: () => {
             setState('idle')
-            router.push('/packages?payment=cancelled')
+            router.push(next ? `/packages?payment=cancelled&next=${encodeURIComponent(next)}` : '/packages?payment=cancelled')
           },
         },
       }

@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Eye, EyeOff, Heart, IdCard, Lock, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { useI18n } from '@/lib/i18n/provider'
@@ -19,6 +19,15 @@ type FieldErrors = {
   password?: string
 }
 
+function getSafeRedirect(candidate?: string | null): string {
+  if (!candidate) return '/profile'
+  const trimmed = candidate.trim()
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.includes('\\')) {
+    return trimmed
+  }
+  return '/profile'
+}
+
 /**
  * Single sign-in form: ONE identifier (email ID *or* mobile number) + password.
  *
@@ -28,9 +37,11 @@ type FieldErrors = {
  * the account behind `profiles.mobile` and authenticates it server-side — the
  * stored email never has to round-trip through the browser.
  */
-export function LoginForm() {
+export function LoginForm({ next }: { next?: string } = {}) {
   const { t } = useI18n()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const targetRedirect = getSafeRedirect(next ?? searchParams.get('next'))
 
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
@@ -110,7 +121,7 @@ export function LoginForm() {
           return
         }
         persistIdentifier(credential.value)
-        router.push('/profile')
+        router.push(targetRedirect)
         router.refresh()
         return
       }
@@ -196,7 +207,7 @@ export function LoginForm() {
 
       persistIdentifier(credential.value)
 
-      router.push('/profile')
+      router.push(targetRedirect)
       router.refresh()
     } catch {
       setFormError(t('login.error.generic'))
@@ -358,7 +369,10 @@ export function LoginForm() {
 
             <p className="mt-6 text-center text-sm text-stone-600">
               {t('login.noAccount')}{' '}
-              <Link href="/register" className="font-semibold text-brand-700 hover:text-brand-800">
+              <Link
+                href={targetRedirect !== '/profile' ? `/register?next=${encodeURIComponent(targetRedirect)}` : '/register'}
+                className="font-semibold text-brand-700 hover:text-brand-800"
+              >
                 {t('login.register')}
               </Link>
             </p>
