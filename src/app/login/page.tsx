@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 import { CheckCircle2 } from 'lucide-react'
 import { LoginForm } from '@/components/auth/login-form'
 
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
 export default function LoginPage({
   searchParams,
 }: {
-  searchParams?: { deleted?: string }
+  searchParams?: { deleted?: string; next?: string }
 }) {
   return (
     <>
@@ -22,7 +23,9 @@ export default function LoginPage({
           </p>
         </div>
       )}
-      <LoginForm />
+      <Suspense fallback={<div className="container-page py-16 text-center text-stone-500">Loading…</div>}>
+        <LoginForm next={searchParams?.next} />
+      </Suspense>
     </>
   )
 }

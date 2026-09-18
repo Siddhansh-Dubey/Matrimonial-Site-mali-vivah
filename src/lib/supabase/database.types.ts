@@ -1084,6 +1084,13 @@ export type Database = {
           sort_order: number
           created_at: string
           updated_at: string
+          submitted_by: string | null
+          rating: number | null
+          milestone: string | null
+          valued_features: Json
+          future_members_note: string | null
+          consent_to_publish: boolean
+          submitted_at: string | null
         }
         Insert: {
           id?: string
@@ -1096,6 +1103,13 @@ export type Database = {
           sort_order?: number
           created_at?: string
           updated_at?: string
+          submitted_by?: string | null
+          rating?: number | null
+          milestone?: string | null
+          valued_features?: Json
+          future_members_note?: string | null
+          consent_to_publish?: boolean
+          submitted_at?: string | null
         }
         Update: {
           id?: string
@@ -1108,8 +1122,23 @@ export type Database = {
           sort_order?: number
           created_at?: string
           updated_at?: string
+          submitted_by?: string | null
+          rating?: number | null
+          milestone?: string | null
+          valued_features?: Json
+          future_members_note?: string | null
+          consent_to_publish?: boolean
+          submitted_at?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "success_stories_submitted_by_fkey"
+            columns: ["submitted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       admin_audit_log: {
         Row: {
@@ -1410,6 +1439,21 @@ export type Database = {
       }
       mark_conversation_read: { Args: { p_conversation_id: string }; Returns: number }
       unread_message_count: { Args: Record<string, never>; Returns: number }
+      submit_success_story: {
+        Args: {
+          p_couple_names: string
+          p_title: string
+          p_story: string
+          p_rating: number
+          p_milestone?: string | null
+          p_wedding_date?: string | null
+          p_photo_path?: string | null
+          p_valued_features?: Json
+          p_future_members_note?: string | null
+          p_consent?: boolean
+        }
+        Returns: string
+      }
     }
     Enums: {
       for_whom: 'self' | 'son' | 'daughter'

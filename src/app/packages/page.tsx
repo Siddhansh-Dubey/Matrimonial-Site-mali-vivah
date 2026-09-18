@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { BadgeCheck, Check, Crown, Lock } from 'lucide-react'
+import { BadgeCheck, Check, Crown, Heart, Lock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
 import { fallbackPackages, getActiveSubscription } from '@/lib/profile/subscription'
@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic'
 export default async function PackagesPage({
   searchParams,
 }: {
-  searchParams?: { payment?: string }
+  searchParams?: { payment?: string; next?: string; reason?: string }
 }) {
   const supabase = isSupabaseConfigured ? createClient() : null
   const {
@@ -57,14 +57,26 @@ export default async function PackagesPage({
         </div>
 
         {searchParams?.payment === 'success' && (
-          <div className="mx-auto mt-8 flex max-w-2xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
-            <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-            <span>
-              <span className="font-bold">Payment successful.</span> Your membership is now active
-              and your profile is being published in Brides &amp; Grooms. If your profile is not
-              live within a minute, open <Link href="/profile/edit" className="font-semibold underline underline-offset-2">your profile</Link>{' '}
-              and complete any missing details.
-            </span>
+          <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900 shadow-sm">
+            <div className="flex items-start gap-3">
+              <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+              <span>
+                <span className="font-bold">Payment successful.</span> Your membership is now active
+                and your profile is being published in Brides &amp; Grooms. If your profile is not
+                live within a minute, open <Link href="/profile/edit" className="font-semibold underline underline-offset-2">your profile</Link>{' '}
+                and complete any missing details.
+              </span>
+            </div>
+            {searchParams?.next && (
+              <div className="mt-4 border-t border-emerald-200/60 pt-3">
+                <Link
+                  href={searchParams.next}
+                  className="btn-primary inline-flex items-center gap-2 text-xs py-2 px-4"
+                >
+                  Continue to Success Story Submission &rarr;
+                </Link>
+              </div>
+            )}
           </div>
         )}
         {searchParams?.payment === 'cancelled' && (
@@ -74,21 +86,45 @@ export default async function PackagesPage({
           </div>
         )}
 
+        {(searchParams?.reason === 'stories' || searchParams?.next?.includes('success-stories')) && !subscription && (
+          <div className="mx-auto mt-8 flex max-w-2xl items-start gap-3 rounded-2xl border border-gold-400/50 bg-amber-50/80 px-5 py-4 text-sm text-maroon shadow-sm">
+            <Heart className="mt-0.5 h-5 w-5 shrink-0 text-maroon fill-gold-300" />
+            <div>
+              <p className="font-bold">Submitting a Success Story is available to active paid members.</p>
+              <p className="mt-1 text-stone-700">
+                Choose any package below to activate your membership and share your journey with the Mali Samaj community.
+              </p>
+            </div>
+          </div>
+        )}
+
         {user && subscription ? (
-          <div className="mx-auto mt-8 flex max-w-2xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
-            <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-            <span>
-              You hold an active package
-              {subscription.package_slug ? (
-                <>
-                  {' '}
-                  (<span className="font-semibold">{prettySlug(subscription.package_slug)}</span>)
-                </>
-              ) : null}
-              , valid till{' '}
-              <span className="font-semibold">{formatDate(subscription.expires_at)}</span>. All
-              profile details are unlocked for you.
-            </span>
+          <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900 shadow-sm">
+            <div className="flex items-start gap-3">
+              <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+              <span>
+                You hold an active package
+                {subscription.package_slug ? (
+                  <>
+                    {' '}
+                    (<span className="font-semibold">{prettySlug(subscription.package_slug)}</span>)
+                  </>
+                ) : null}
+                , valid till{' '}
+                <span className="font-semibold">{formatDate(subscription.expires_at)}</span>. All
+                profile details are unlocked for you.
+              </span>
+            </div>
+            {searchParams?.next && (
+              <div className="mt-4 border-t border-emerald-200/60 pt-3">
+                <Link
+                  href={searchParams.next}
+                  className="btn-primary inline-flex items-center gap-2 text-xs py-2 px-4"
+                >
+                  Continue to Success Story Submission &rarr;
+                </Link>
+              </div>
+            )}
           </div>
         ) : user ? (
           <div className="mx-auto mt-8 flex max-w-2xl items-start gap-3 rounded-2xl border border-gold-400/50 bg-gold-100/50 px-5 py-4 text-sm text-maroon-deep">
@@ -100,11 +136,17 @@ export default async function PackagesPage({
           </div>
         ) : (
           <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-stone-200 bg-white/70 px-5 py-4 text-center text-sm text-stone-600">
-            <Link href="/login" className="font-semibold text-maroon underline underline-offset-2">
+            <Link
+              href={searchParams?.next ? `/login?next=${encodeURIComponent(searchParams.next)}` : '/login'}
+              className="font-semibold text-maroon underline underline-offset-2"
+            >
               Log in
             </Link>{' '}
             to purchase a package, or{' '}
-            <Link href="/register" className="font-semibold text-maroon underline underline-offset-2">
+            <Link
+              href={searchParams?.next ? `/register?next=${encodeURIComponent(searchParams.next)}` : '/register'}
+              className="font-semibold text-maroon underline underline-offset-2"
+            >
               register free
             </Link>{' '}
             first.
@@ -159,10 +201,11 @@ export default async function PackagesPage({
                       priceInr={pkg.price_inr}
                       featured={featured}
                       hasActive={Boolean(subscription)}
+                      next={searchParams?.next}
                     />
                   ) : (
                     <Link
-                      href="/login"
+                      href={searchParams?.next ? `/login?next=${encodeURIComponent(searchParams.next)}` : '/login'}
                       className={
                         featured
                           ? 'inline-flex w-full items-center justify-center rounded-full bg-gold-400 px-6 py-2.5 text-sm font-bold text-maroon-deep hover:bg-gold-300'
