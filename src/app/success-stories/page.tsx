@@ -51,12 +51,6 @@ export default async function SuccessStoriesPage() {
             Couples from the Mali Samaj who found each other through Mali Vivah — shared with
             their permission.
           </p>
-          <div className="mt-6 flex justify-center">
-            <Link href={cta.href} className="btn-primary inline-flex items-center gap-2">
-              <Heart className="h-4 w-4 fill-current text-white/90" />
-              Begin Story
-            </Link>
-          </div>
         </div>
 
         {stories.length === 0 ? (
