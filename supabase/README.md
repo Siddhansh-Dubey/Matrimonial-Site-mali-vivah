@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Twenty-one migrations, run in filename order:
+Twenty-four migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -72,27 +72,34 @@ engagement, activity, messaging):
     `conversation_members`, `messages`, their RLS, the ten chat RPCs, the
     triggers and the Realtime publication. Details below.
 
-Migrations 18–21 are the **Phase 2 deepening** (competitor parity + safety —
-run after 1–17):
+Migrations 18–24 are the **Phase 2 deepening** (verification, monetisation,
+operator-managed content, safety + analytics — run after 1–17):
 
-18. `20260919000000_phase2_foundation.sql` — `communities` seeds (the 10
-    sub-castes), `site_config`, mobile-verification storage (`user_otps`), the
-    photo privacy enum, `profile_boosts` price/status columns, `notification`
-    preference columns on `profiles`, `moments.media_type`, and `match_rules`
-    config. Idempotent: safe to re-run in the SQL editor.
-19. `20260919010000_phase2_profile_schema.sql` — `matrimony_profiles` gains
-    company, smoking/drinking, family detail, native-place, country and photo
-    accounting columns; photo-count trigger (1–20); search RPC gains filters
-    (`q`, Gotra, diet, manglik, star, income, complexion) and paid
-    sort/pagination caps.
-20. `20260919020000_phase2_matching_moments.sql` — DB-driven `match_config`
-    (replaces hard-coded scoring), `moment_likes`, `moment_reports`, video MIME
-    allow-list, boost purchase ledger (`boost_purchases`), +3 benefits on VIP.
-21. `20260919030000_phase2_profile_whatsapp.sql` — smart country column default
-    for existing rows, gating on `photo_visibility` / `message_privacy` (and
-    plan-gated WhatsApp), `get_safe_contact()` RPC v2 (opt-in enforced),
-    `matrimony_profiles` RLS SELECT policies, `updated_at` trigger, and
-    `match_config` verification-bonus re-seed.
+18. `20260918000000_success_stories_submissions.sql` — member story
+    submissions queue behind `/success-stories/submit` (admin approves in
+    `/admin/stories`).
+19. `20260919000000_mobile_otp_verification.sql` — `mobile_otp_requests`
+    ledger plus the `request_mobile_otp()` (60s cooldown, 5/hour cap) and
+    `complete_mobile_otp_verification()` RPCs. The SMS itself is delivered
+    by Supabase phone auth — configure an SMS provider in the project.
+20. `20260919010000_boost_purchases.sql` — `profile_boost_config`
+    (admin-priced à la carte boosts), the `activate_boost_purchase()` RPC
+    the payments webhook calls after capture, and boost-aware refunds.
+21. `20260919020000_site_content_whatsapp.sql` — operator-managed website
+    copy (`site_content`) and WhatsApp configuration (`whatsapp_config`)
+    with the `get_site_content()` / `get_whatsapp_config()` readers the
+    About page, homepage and footer use (compiled fallbacks included).
+22. `20260919030000_moment_reports_activity.sql` — `reports.target_type` /
+    `target_id` so a report can point at a moment, the `report_moment()`
+    member RPC (deduped, self-reports rejected), and moment activity events.
+23. `20260919040000_activity_completeness.sql` — completes the
+    `activity_events` stream (contact reveals, interest responses,
+    verification + story submissions) and ships `get_public_profile()` v3
+    with privacy-settings honoring.
+24. `20260919050000_whatsapp_optin_gate.sql` — adds the `whatsapp_allowed`
+    key to `get_public_profile()` (paid + mutual + owner opt-in), so the
+    profile page can honour the member's WhatsApp toggle. Additive and
+    idempotent; existing rows default to opted-out.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's

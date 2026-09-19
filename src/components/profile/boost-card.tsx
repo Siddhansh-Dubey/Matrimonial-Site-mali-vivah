@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { Loader2, Rocket } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { isSupabaseConfigured } from '@/lib/env'
-import { BoostPurchaseButton } from '@/components/profile/boost-purchase-button'
 
 /**
  * Profile boost.
@@ -67,7 +66,6 @@ export function BoostCard({
   const [buying, setBuying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
-  const [quotaExhausted, setQuotaExhausted] = useState(false)
 
   async function boost() {
     if (!isSupabaseConfigured) return
@@ -82,7 +80,6 @@ export function BoostCard({
         if (msg.includes('BOOSTS_NOT_INCLUDED')) {
           setError('Boosts are part of paid plans. Upgrade to rocket your profile to the top.')
         } else if (msg.includes('BOOST_LIMIT_REACHED')) {
-          setQuotaExhausted(true)
           setError('You have used all the boosts included in your current plan.')
         } else {
           setError(msg)
@@ -95,7 +92,7 @@ export function BoostCard({
         setMessage(
           res.status === 'already_active'
             ? 'Your boost is already running.'
-            : `Boost activated — your profile appears first in search for the next ${boostDays} days.`
+            : 'Boost activated — your profile appears first in search for the next 7 days.'
         )
         router.refresh()
       }
@@ -203,7 +200,7 @@ export function BoostCard({
         <p className="text-sm text-stone-600">
           {active
             ? 'Your boost is live — you appear first in Brides, Grooms and Search while it lasts.'
-            : `Rocket your profile to the very top of Brides, Grooms and Search for ${boostDays} days.`}
+            : 'Rocket your profile to the very top of Brides, Grooms and Search for 7 days.'}
         </p>
         {!active && isPaid && (
           <>
@@ -257,11 +254,9 @@ export function BoostCard({
         {error && (
           <p className="mt-3 text-sm font-semibold text-brand-700">
             {error}{' '}
-            {!quotaExhausted && (
-              <a href="/packages" className="underline underline-offset-2">
-                View packages
-              </a>
-            )}
+            <a href="/packages" className="underline underline-offset-2">
+              View packages
+            </a>
           </p>
         )}
       </div>

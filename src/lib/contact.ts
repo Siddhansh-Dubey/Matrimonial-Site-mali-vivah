@@ -8,11 +8,5 @@ export const SUPPORT_PHONE_DISPLAY = '90000 00000'
 export const SUPPORT_WHATSAPP_NUMBER = '919000000000'
 
 export function whatsappLink(prefill: string): string {
-  return buildWhatsappLink(SUPPORT_WHATSAPP_NUMBER, prefill)
-}
-
-/** Same wa.me link for an explicit number (DB-configured support line, member phone…). */
-export function buildWhatsappLink(number: string, prefill: string): string {
-  const digits = number.replace(/\D/g, '')
-  return `https://wa.me/${digits}?text=${encodeURIComponent(prefill)}`
+  return `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}?text=${encodeURIComponent(prefill)}`
 }

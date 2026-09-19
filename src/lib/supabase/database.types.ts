@@ -18,11 +18,6 @@
  * - 20260915140000_activity_login_register.sql (registration + login activity events)
  * - 20260917000000_notification_enum_message_received.sql (notification_type += message_received)
  * - 20260917010000_chat.sql                   (conversations, conversation_members, messages + chat RPCs)
- * - 20260918000000_success_stories_submissions.sql (submit_success_story)
- * - 20260919000000_phase2_site_config_otp.sql (site_config, mobile_otps, moment_reports)
- * - 20260919010000_phase2_boost_purchase.sql  (purchased boosts, quota narrowing)
- * - 20260919020000_phase2_search_gating.sql   (sub-community joins the advanced filters)
- * - 20260919030000_phase2_profile_whatsapp.sql (get_public_profile += whatsapp_allowed)
  *
  * If you change the SQL, update this file to match.
  */
@@ -1507,117 +1502,6 @@ export type Database = {
           },
         ]
       }
-      /**
-       * Operator-editable public settings. No direct member access —
-       * get_public_site_config() exposes the allow-listed keys; admins edit
-       * via the audited service-role action.
-       */
-      site_config: {
-        Row: {
-          key: string
-          value: Json
-          updated_at: string
-        }
-        Insert: {
-          key: string
-          value: Json
-          updated_at?: string
-        }
-        Update: {
-          key?: string
-          value?: Json
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      /**
-       * Mobile OTP codes (hash-only). Service-role only — the
-       * /api/verification/otp/* routes own every read/write.
-       */
-      mobile_otps: {
-        Row: {
-          id: string
-          user_id: string
-          mobile: string
-          code_hash: string
-          expires_at: string
-          attempts: number
-          consumed_at: string | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          mobile: string
-          code_hash: string
-          expires_at: string
-          attempts?: number
-          consumed_at?: string | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          mobile?: string
-          code_hash?: string
-          expires_at?: string
-          attempts?: number
-          consumed_at?: string | null
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: 'mobile_otps_user_id_fkey'
-            columns: ['user_id']
-            isOneToOne: false
-            referencedRelation: 'profiles'
-            referencedColumns: ['id']
-          },
-        ]
-      }
-      /** Member reports against Mali Moments (one per member per moment). */
-      moment_reports: {
-        Row: {
-          id: number
-          moment_id: string
-          reporter_id: string
-          reason: Database['public']['Enums']['report_reason']
-          details: string | null
-          created_at: string
-        }
-        Insert: {
-          id?: never
-          moment_id: string
-          reporter_id: string
-          reason: Database['public']['Enums']['report_reason']
-          details?: string | null
-          created_at?: string
-        }
-        Update: {
-          id?: never
-          moment_id?: string
-          reporter_id?: string
-          reason?: Database['public']['Enums']['report_reason']
-          details?: string | null
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: 'moment_reports_moment_id_fkey'
-            columns: ['moment_id']
-            isOneToOne: false
-            referencedRelation: 'moments'
-            referencedColumns: ['id']
-          },
-          {
-            foreignKeyName: 'moment_reports_reporter_id_fkey'
-            columns: ['reporter_id']
-            isOneToOne: false
-            referencedRelation: 'profiles'
-            referencedColumns: ['id']
-          },
-        ]
-      }
     }
     Views: {
       [_ in never]: never
@@ -1747,13 +1631,6 @@ export type Database = {
         }
         Returns: string
       }
-      /** Allow-listed public site settings (support contacts, boost pricing). */
-      get_public_site_config: { Args: Record<string, never>; Returns: Json }
-      /** Service-role-only: activates a paid à la carte profile boost. */
-      activate_purchased_boost: {
-        Args: { p_user_id: string; p_payment_id: string }
-        Returns: Json
-      }
     }
     Enums: {
       for_whom: 'self' | 'son' | 'daughter'
@@ -1826,9 +1703,6 @@ export type AccountDeletionRequestRow = Database['public']['Tables']['account_de
 export type ConversationRow = Database['public']['Tables']['conversations']['Row']
 export type ConversationMemberRow = Database['public']['Tables']['conversation_members']['Row']
 export type MessageRow = Database['public']['Tables']['messages']['Row']
-export type SiteConfigRow = Database['public']['Tables']['site_config']['Row']
-export type MobileOtpRow = Database['public']['Tables']['mobile_otps']['Row']
-export type MomentReportRow = Database['public']['Tables']['moment_reports']['Row']
 
 export type Gender = Database['public']['Enums']['gender']
 export type MaritalStatus = Database['public']['Enums']['marital_status']
@@ -1915,6 +1789,8 @@ export type PublicProfileCard = {
   mutual_interest?: boolean | null
   contact_phone?: string | null
   contact_email?: string | null
+  /** TRUE only for paid + mutual viewers when the owner opted into WhatsApp (migration 20260919050000). */
+  whatsapp_allowed?: boolean | null
 }
 
 /** Render-ready output of profile_visibility_reason(). */

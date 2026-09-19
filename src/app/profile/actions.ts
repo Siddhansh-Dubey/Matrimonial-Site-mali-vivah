@@ -25,6 +25,7 @@
  * base schema, so it works even on databases where later optional migrations
  * were never applied.
  */
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { isSupabaseConfigured } from '@/lib/env'
@@ -116,4 +117,26 @@ export async function deleteMyAccount(): Promise<DeleteAccountResult> {
   }
 
   return { ok: true }
+}
+
+/**
+ * Remove one of the caller's own blocks (Settings → Blocked members).
+ * Runs in the member session: RLS ("Blocker manages own blocks") makes it
+ * impossible to delete anyone else's row — the extra blocker_id filter is
+ * belt and braces.
+ */
+export async function unblockMember(formData: FormData): Promise<void> {
+  if (!isSupabaseConfigured) throw new Error('The database is not configured on this server yet.')
+  const supabase = createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) throw new Error('You are signed out — please sign in again.')
+
+  const blockId = Number(formData.get('block_id'))
+  if (!Number.isFinite(blockId)) throw new Error('Invalid request.')
+
+  const { error } = await supabase.from('blocks').delete().eq('id', blockId).eq('blocker_id', user.id)
+  if (error) throw new Error(error.message)
+  revalidatePath('/profile/settings')
 }

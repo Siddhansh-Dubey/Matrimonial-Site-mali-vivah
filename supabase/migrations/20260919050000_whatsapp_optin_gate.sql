@@ -1,14 +1,24 @@
 -- ============================================================================
--- Mali Vivah — Phase 2: expose the WhatsApp opt-in on public profiles
--- ============================================================================
--- get_public_profile() v2 — identical to the §10 definition plus one field:
--- 'whatsapp_allowed' is TRUE only for a paid viewer with mutual interest
--- when the member opted into WhatsApp contact (matrimony_profiles
--- .whatsapp_opt_in). The profile page renders the WhatsApp button from it —
--- the same gate as the phone number, honouring the member's setting.
+-- Mali Vivah · Reconciliation — WhatsApp opt-in enforcement on profiles
+--
+-- WHAT IT DOES
+--   Extends get_public_profile() with one additive key:
+--     'whatsapp_allowed' — TRUE only when ALL of these hold:
+--       1. the viewer is paid,
+--       2. interest is mutual (the same gate as contact_phone/email), AND
+--       3. the profile owner opted in (matrimony_profiles.whatsapp_opt_in,
+--          toggled at /profile/settings).
+--
+-- WHY: the settings toggle promises members control over WhatsApp contact,
+-- but the profile page previously had no signal to honour it — the WhatsApp
+-- button rendered for every mutual match. The opt-in is ANDed with the
+-- contact gate so the preference itself never leaks to unauthorised viewers
+-- (non-mutual viewers always see FALSE, same as a member who never opted in).
 --
 -- HOW TO APPLY: Supabase Dashboard → SQL Editor → paste → Run.
--- Safe to re-run. DEPENDS ON 20260915130000 (§10).
+-- Safe to re-run (CREATE OR REPLACE). No new tables, no backfill needed
+-- (existing rows default to opted-out via coalesce).
+-- DEPENDS ON migrations up to 20260919040000 (get_public_profile v3).
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION public.get_public_profile(p_user_id UUID)
@@ -85,7 +95,11 @@ BEGIN
     'viewer_is_paid', v_is_paid,
     'mutual_interest', v_mutual,
     'contact_phone', CASE WHEN (v_is_paid AND v_mutual) THEN p.mobile ELSE NULL END,
-    'whatsapp_allowed', CASE WHEN (v_is_paid AND v_mutual) THEN coalesce(mp.whatsapp_opt_in, FALSE) ELSE FALSE END
+    'contact_email', CASE WHEN (v_is_paid AND v_mutual) THEN p.email ELSE NULL END,
+    'whatsapp_allowed', CASE
+      WHEN (v_is_paid AND v_mutual) AND coalesce(mp.whatsapp_opt_in, FALSE)
+      THEN TRUE ELSE FALSE
+    END
   )
   INTO v_result
   FROM public.matrimony_profiles mp
@@ -94,12 +108,19 @@ BEGIN
     AND public.is_profile_public(p_user_id)
     AND NOT public.is_blocked(auth.uid(), p_user_id);
 
+  -- View analytics: only real, publicly-listed views of SOMEONE ELSE
+  -- (self-views never count).
+  IF v_result IS NOT NULL AND auth.uid() IS NOT NULL AND auth.uid() <> p_user_id THEN
+    PERFORM public.log_activity(
+      auth.uid(),
+      'profile_viewed',
+      jsonb_build_object('target', p_user_id)
+    );
+  END IF;
+
   RETURN v_result;
 END;
 $$;
 
 COMMENT ON FUNCTION public.get_public_profile(uuid) IS
-  'Safe public profile for publicly-listed members. Paid viewers additionally see the family section + lifestyle fields when the member''s privacy_settings allow. Phone only when paid + mutual; whatsapp_allowed mirrors the member''s WhatsApp opt-in under the same gate. Blocked pairs see nothing.';
-
-REVOKE ALL ON FUNCTION public.get_public_profile(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.get_public_profile(uuid) TO anon, authenticated;
+  'Safe public profile for publicly-listed members. Paid viewers additionally see the family section + lifestyle fields when the member''s privacy_settings allow. Phone AND email only when paid + mutual. whatsapp_allowed adds the member''s WhatsApp opt-in to the same gate. Logs profile_viewed analytics.';

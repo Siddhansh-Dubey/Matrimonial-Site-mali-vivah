@@ -18,7 +18,6 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
-import { buildWhatsappLink } from '@/lib/contact'
 import { photoUrl } from '@/lib/profile/photos'
 import { MASK_BLUR_CLASS, maskPhone } from '@/lib/profile/mask'
 import { getProfileVisibility } from '@/lib/profile/visibility'
@@ -307,35 +306,12 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                 <Phone className="h-3.5 w-3.5" /> Phone number
               </p>
               {canSeePhone && phone ? (
-                <>
-                  <a
-                    href={`tel:${phone.replace(/\D/g, '')}`}
-                    className="mt-1 block font-display text-xl font-bold tracking-wide text-maroon"
-                  >
-                    {phone}
-                  </a>
-                  <div className="mt-2.5 flex flex-wrap gap-2">
-                    <a
-                      href={`tel:${phone.replace(/\D/g, '')}`}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-maroon px-4 py-2 text-xs font-bold text-white hover:bg-maroon-dark"
-                    >
-                      <Phone className="h-3.5 w-3.5" /> Call now
-                    </a>
-                    {profile.whatsapp_allowed === true && (
-                      <a
-                        href={buildWhatsappLink(
-                          withCountryCode(phone),
-                          `Namaskar, I found your profile on Mali Vivah (${displayName}).`
-                        )}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 rounded-full bg-[#25d366] px-4 py-2 text-xs font-bold text-white hover:brightness-95"
-                      >
-                        <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
-                      </a>
-                    )}
-                  </div>
-                </>
+                <a
+                  href={`tel:${phone.replace(/\D/g, '')}`}
+                  className="mt-1 block font-display text-xl font-bold tracking-wide text-maroon"
+                >
+                  {phone}
+                </a>
               ) : (
                 <p className="mt-1 flex items-center gap-2">
                   <span className={`font-display text-xl font-bold tracking-wide text-stone-400 ${MASK_BLUR_CLASS}`} aria-hidden>
@@ -344,7 +320,7 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                   <Lock className="h-4 w-4 text-stone-400" />
                 </p>
               )}
-              <p className="mt-2 text-xs text-stone-500">
+              <p className="mt-1 text-xs text-stone-500">
                 {!isPaid
                   ? 'Purchase any package, then express mutual interest to reveal the number.'
                   : !mutual
@@ -363,14 +339,20 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                   >
                     <Phone className="h-3.5 w-3.5" /> Call
                   </a>
-                  <a
-                    href={whatsappChatLink(phone)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-3 py-2.5 text-xs font-bold text-white hover:brightness-95"
-                  >
-                    <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
-                  </a>
+                  {profile.whatsapp_allowed === true ? (
+                    <a
+                      href={whatsappChatLink(phone)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-3 py-2.5 text-xs font-bold text-white hover:brightness-95"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+                    </a>
+                  ) : (
+                    <span className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-xs font-semibold text-stone-400">
+                      <MessageCircle className="h-3.5 w-3.5" /> WhatsApp unavailable
+                    </span>
+                  )}
                   {profile.contact_email ? (
                     <a
                       href={`mailto:${profile.contact_email}`}
@@ -492,12 +474,6 @@ function LockedItem({ icon: Icon, label, fake }: { icon: typeof Heart; label: st
 
 function label(v: string): string {
   return v.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-/** wa.me needs the full international number — assume India for 10-digit mobiles. */
-function withCountryCode(phone: string): string {
-  const digits = phone.replace(/\D/g, '')
-  return digits.length === 10 ? `91${digits}` : digits
 }
 
 function Row({ label: lbl, value }: { label: string; value: string }) {

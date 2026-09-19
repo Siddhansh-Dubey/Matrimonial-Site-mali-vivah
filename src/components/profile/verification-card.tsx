@@ -6,8 +6,6 @@ import { BadgeCheck, Camera, Clock, IdCard, Loader2, ShieldCheck, Smartphone } f
 import { createClient } from '@/lib/supabase/client'
 import { isSupabaseConfigured } from '@/lib/env'
 
-type DocType = 'photo' | 'id_document'
-
 /**
  * Verification centre (PRD D + E).
  *
@@ -29,15 +27,12 @@ type PendingTypes = { photo?: boolean; id_document?: boolean; mobile?: boolean }
 export function VerificationCard({
   verified,
   mobileVerified,
-  mobile,
   reason,
   pending,
   mobileNumber,
 }: {
   verified: boolean
   mobileVerified: boolean
-  /** The member's saved mobile number (may be null for email-only accounts). */
-  mobile: string | null
   /** visibility reason — used only to nudge order of operations. */
   reason: string
   /** types with an open (pending) request. */
@@ -75,7 +70,7 @@ export function VerificationCard({
         return
       }
       const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')
-      const path = type === 'id_document' ? `${uid}/id/${Date.now()}-${safeName}` : `${uid}/${Date.now()}-${safeName}`
+      const path = `${uid}/${Date.now()}-${safeName}`
       const { error: upError } = await supabase.storage
         .from('verification-docs')
         .upload(path, file, { upsert: false })
@@ -159,71 +154,6 @@ export function VerificationCard({
       setBusy(null)
     }
   }
-
-  async function sendCode() {
-    setOtpBusy('send')
-    setOtpError(null)
-    setDevCode(null)
-    try {
-      const res = await fetch('/api/verification/otp/send', { method: 'POST' })
-      const body = (await res.json()) as {
-        ok?: boolean
-        alreadyVerified?: boolean
-        error?: string
-        retryAfter?: number
-        devCode?: string
-      }
-      if (!res.ok || !body.ok) {
-        setOtpError(body.error ?? 'Could not send the code. Please try again.')
-        if (body.retryAfter) setCooldown(body.retryAfter)
-        return
-      }
-      if (body.alreadyVerified) {
-        setMobileDone(true)
-        router.refresh()
-        return
-      }
-      setOtpSent(true)
-      setCooldown(60)
-      if (body.devCode) setDevCode(body.devCode)
-    } catch {
-      setOtpError('Could not send the code. Please try again.')
-    } finally {
-      setOtpBusy(null)
-    }
-  }
-
-  async function verifyCode() {
-    if (!/^\d{6}$/.test(code.trim())) {
-      setOtpError('Enter the 6-digit code from the SMS.')
-      return
-    }
-    setOtpBusy('verify')
-    setOtpError(null)
-    try {
-      const res = await fetch('/api/verification/otp/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: code.trim() }),
-      })
-      const body = (await res.json()) as { ok?: boolean; error?: string; expired?: boolean }
-      if (!res.ok || !body.ok) {
-        setOtpError(body.error ?? 'Verification failed. Please try again.')
-        if (body.expired) setOtpSent(false)
-        return
-      }
-      setMobileDone(true)
-      setOtpSent(false)
-      setCode('')
-      router.refresh()
-    } catch {
-      setOtpError('Verification failed. Please try again.')
-    } finally {
-      setOtpBusy(null)
-    }
-  }
-
-  const showPublishNudge = reason === 'not_published' || reason === 'profile_incomplete'
 
   return (
     <div className="card overflow-hidden">

@@ -34,10 +34,10 @@ SQL Editor → test register/login.
   profile boosts (plan quota + à la carte purchase), homepage featured profiles,
   success stories, biodata PDF** (unlocked for the member and for mutual-accepted
   paid viewers).
-- **Mobile verification by SMS OTP** (MSG91 in production, dev-code fallback
-  locally), **photo + ID document** verification tracks, and a member
-  **Settings & privacy** page (paid-viewer visibility toggles, WhatsApp opt-in,
-  own block list).
+- **Mobile verification by SMS OTP** (Supabase phone auth — configure an SMS
+  provider in the project), **photo + ID document** verification tracks, and a
+  member **Settings & privacy** page (`/profile/settings`: paid-viewer
+  visibility toggles, WhatsApp opt-in, own block list).
 - **In-app messaging at `/messages`** — paid members with a **mutual** match
   only. Conversations, messages, read state and unread badges live in
   Supabase with RLS; writes go exclusively through SECURITY DEFINER RPCs that
@@ -47,10 +47,10 @@ SQL Editor → test register/login.
 - **Safety** — report + block, verification requests (photo/ID reviewed in admin).
 - **Admin panel at `/admin`** — RBAC via `profiles.is_admin`, every mutation is a
   server action audited into `admin_audit_log`: dashboard, analytics (growth +
-  engagement), members, verification queue, packages & pricing, payments (refund
-  / manual recovery), reports, blocked users, moments moderation (incl. member
-  reports), featured curation, stories, matching config, site settings (support
-  channels + boost pricing).
+  engagement), members, verification queue (status/type filters), packages &
+  pricing, payments (refund / manual recovery), reports, blocked users
+  (searchable), boosts, moments moderation (incl. member reports), featured
+  curation, stories, matching config, site content + WhatsApp config.
 - **Account deletion is self-serve and immediate** — no request queue: the
   member's profile page wipes the auth user, every cascading row and all
   uploaded photos in one shot (`src/app/profile/actions.ts`).
@@ -68,9 +68,10 @@ Everyone else hitting `/admin` is redirected to `/login`.
 ## Support contact channels
 
 WhatsApp/phone/email shown in the footer + the contact section of the About page
-are operator-editable in **Admin → Settings** (`site_config` table, seeded by
-migration `20260919000000`). The compiled fallbacks live in ONE place:
-`src/lib/contact.ts` — set the real numbers before go-live.
+are operator-editable in **Admin → Content** and **Admin → WhatsApp**
+(`site_content` / `whatsapp_config` tables, migration `20260919020000`). The
+compiled fallbacks live in ONE place: `src/lib/contact.ts` — set the real
+numbers before go-live.
 (`src/app/contact/page.tsx` is only a redirect stub to `/about#contact`.)
 
 ## Database test harness

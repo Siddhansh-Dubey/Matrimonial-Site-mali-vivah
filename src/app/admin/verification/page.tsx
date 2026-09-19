@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 
 const STATUSES = [
   { value: 'pending', label: 'Pending' },
-  { value: 'approved', label: 'Approved' },
+  { value: 'verified', label: 'Verified' },
   { value: 'rejected', label: 'Rejected' },
   { value: 'all', label: 'All statuses' },
 ] as const
@@ -17,7 +17,7 @@ const TYPES = [
   { value: 'all', label: 'All types' },
   { value: 'mobile', label: 'Mobile OTP' },
   { value: 'photo', label: 'Photo' },
-  { value: 'id_proof', label: 'ID proof' },
+  { value: 'id_document', label: 'ID proof' },
 ] as const
 
 /**
@@ -29,12 +29,13 @@ const TYPES = [
 export default async function AdminVerificationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; type?: string }>
+  searchParams?: { status?: string; type?: string }
 }) {
   const { admin } = await requireAdminPage()
-  const sp = await searchParams
-  const status = STATUSES.some((s) => s.value === sp.status) ? (sp.status as string) : 'pending'
-  const type = TYPES.some((t) => t.value === sp.type) ? (sp.type as string) : 'all'
+  const status = STATUSES.some((s) => s.value === searchParams?.status)
+    ? (searchParams?.status as string)
+    : 'pending'
+  const type = TYPES.some((t) => t.value === searchParams?.type) ? (searchParams?.type as string) : 'all'
   const href = (s: string, t: string) => `/admin/verification?status=${s}&type=${t}`
 
   let query = admin
@@ -42,8 +43,9 @@ export default async function AdminVerificationPage({
     .select('id, user_id, type, storage_path, status, created_at, profiles!verification_requests_user_id_fkey(full_name, email)')
     .order('created_at', { ascending: status === 'pending' })
     .limit(100)
-  if (status !== 'all') query = query.eq('status', status)
-  if (type !== 'all') query = query.eq('type', type)
+  if (status !== 'all')
+    query = query.eq('status', status as 'pending' | 'verified' | 'rejected')
+  if (type !== 'all') query = query.eq('type', type as 'mobile' | 'photo' | 'id_document')
   const { data: rows } = await query
 
   const list = rows ?? []

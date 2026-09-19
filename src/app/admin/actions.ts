@@ -284,6 +284,14 @@ export async function removeMoment(formData: FormData) {
   const { admin } = ctx
   const { error } = await admin.from('moments').update({ is_removed: true }).eq('id', momentId)
   if (error) throw new Error(error.message)
+  // Removing the moment resolves its open reports — the queue only ever
+  // shows moments that still need a decision.
+  await admin
+    .from('reports')
+    .update({ status: 'resolved' })
+    .eq('target_type', 'moment')
+    .eq('target_id', momentId)
+    .in('status', ['open', 'reviewing'])
   await audit(ctx, 'moment_removed', 'moment', momentId)
   revalidatePath('/admin/moments')
 }

@@ -173,14 +173,6 @@ export function ProfileWizard() {
   const [company, setCompany] = useState('')
   const [annualIncome, setAnnualIncome] = useState('')
 
-  // family
-  const [fatherOccupation, setFatherOccupation] = useState('')
-  const [motherOccupation, setMotherOccupation] = useState('')
-  const [siblings, setSiblings] = useState('')
-  const [familyType, setFamilyType] = useState('')
-  const [familyLocation, setFamilyLocation] = useState('')
-  const [familyDetails, setFamilyDetails] = useState('')
-
   // about
   const [aboutMe, setAboutMe] = useState('')
   const [hobbies, setHobbies] = useState<string[]>([])
@@ -279,12 +271,6 @@ export function ProfileWizard() {
           setOccupation(profile.occupation ?? '')
           setCompany(profile.company ?? '')
           setAnnualIncome(profile.annual_income ?? '')
-          setFatherOccupation(profile.father_occupation ?? '')
-          setMotherOccupation(profile.mother_occupation ?? '')
-          setSiblings(profile.siblings ?? '')
-          setFamilyType(profile.family_type ?? '')
-          setFamilyLocation(profile.family_location ?? '')
-          setFamilyDetails(profile.family_details ?? '')
           setAboutMe(profile.about_me ?? '')
           setHobbies(profile.hobbies ?? [])
           setSmoking(profile.smoking ?? 'never')
@@ -386,13 +372,6 @@ export function ProfileWizard() {
       occupation,
       company: company.trim() || null,
       annual_income: annualIncome || null,
-      father_occupation: fatherOccupation || null,
-      mother_occupation: motherOccupation || null,
-      siblings: siblings || null,
-      // Optional — omitted when unset so the DB default / existing value stands.
-      ...(familyType ? { family_type: familyType as FamilyType } : {}),
-      family_location: familyLocation || null,
-      family_details: familyDetails || null,
       about_me: aboutMe || null,
       hobbies,
       smoking,
@@ -484,16 +463,6 @@ export function ProfileWizard() {
       if (!r.success) {
         for (const issue of r.error.issues) next[issue.path[0] as string] = issue.message
       }
-    } else if (s === 'family') {
-      const r = familySchema.safeParse({
-        fatherOccupation,
-        motherOccupation,
-        siblings,
-        familyType: familyType || undefined,
-        familyLocation,
-        familyDetails,
-      })
-      if (!r.success) for (const issue of r.error.issues) next[issue.path[0] as string] = issue.message
     } else if (s === 'about') {
       const r = aboutSchema.safeParse({ aboutMe, hobbies, smoking, drinking })
       if (!r.success) for (const issue of r.error.issues) next[issue.path[0] as string] = issue.message
@@ -741,7 +710,6 @@ export function ProfileWizard() {
   const stepTitles: Record<Step, { icon: typeof User; title: string }> = {
     basic: { icon: User, title: t('profile.step.basic.title') },
     education: { icon: BookOpen, title: t('profile.step.education.title') },
-    family: { icon: Home, title: t('profile.step.family.title') },
     about: { icon: Heart, title: t('profile.step.about.title') },
     family: { icon: Home, title: t('profile.step.family.title') },
     preferences: { icon: Users, title: t('profile.step.preferences.title') },
@@ -937,61 +905,6 @@ export function ProfileWizard() {
               </Field>
               <Field label={t('profile.annualIncome')}>
                 <Select value={annualIncome} onChange={setAnnualIncome} options={incomeOptions} allowEmpty />
-              </Field>
-            </div>
-          )}
-
-          {step === 'family' && (
-            <div className="space-y-5">
-              <p className="text-sm text-stone-600">{t('profile.family.intro')}</p>
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <Field label={t('profile.family.fatherOccupation')} error={errors.fatherOccupation}>
-                  <input
-                    value={fatherOccupation}
-                    onChange={(e) => setFatherOccupation(e.target.value)}
-                    className="input"
-                    placeholder={t('profile.family.fatherOccupation.placeholder')}
-                  />
-                </Field>
-                <Field label={t('profile.family.motherOccupation')} error={errors.motherOccupation}>
-                  <input
-                    value={motherOccupation}
-                    onChange={(e) => setMotherOccupation(e.target.value)}
-                    className="input"
-                    placeholder={t('profile.family.motherOccupation.placeholder')}
-                  />
-                </Field>
-              </div>
-              <Field label={t('profile.family.siblings')} error={errors.siblings}>
-                <input
-                  value={siblings}
-                  onChange={(e) => setSiblings(e.target.value)}
-                  className="input"
-                  placeholder={t('profile.family.siblings.placeholder')}
-                />
-              </Field>
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <Field label={t('profile.family.type')}>
-                  <Select value={familyType} onChange={setFamilyType} options={familyTypeOptions} allowEmpty />
-                </Field>
-                <Field label={t('profile.family.location')} error={errors.familyLocation}>
-                  <input
-                    value={familyLocation}
-                    onChange={(e) => setFamilyLocation(e.target.value)}
-                    className="input"
-                    placeholder={t('profile.family.location.placeholder')}
-                  />
-                </Field>
-              </div>
-              <Field label={t('profile.family.details')} hint={t('profile.family.details.hint')}>
-                <textarea
-                  rows={3}
-                  value={familyDetails}
-                  maxLength={500}
-                  onChange={(e) => setFamilyDetails(e.target.value)}
-                  className="input resize-none"
-                  placeholder={t('profile.family.details.placeholder')}
-                />
               </Field>
             </div>
           )}

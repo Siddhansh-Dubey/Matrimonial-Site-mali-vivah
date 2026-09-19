@@ -140,7 +140,7 @@ export default async function AboutPage() {
 
           <div className="mx-auto mt-12 grid max-w-4xl grid-cols-1 gap-6 sm:grid-cols-2">
             <a
-              href={`mailto:${config.supportEmail}`}
+              href={`mailto:${SUPPORT_EMAIL}`}
               className="card flex items-start gap-4 p-6 transition-shadow hover:shadow-card-float"
             >
               <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-700">
@@ -149,7 +149,7 @@ export default async function AboutPage() {
               <span>
                 <span className="font-display text-lg font-bold text-maroon">Email</span>
                 <span className="mt-1 block text-sm text-stone-600">
-                  {config.supportEmail} — best for payment receipts, verification and account help.
+                  {SUPPORT_EMAIL} — best for payment receipts, verification and account help.
                 </span>
               </span>
             </a>
@@ -198,7 +198,7 @@ export default async function AboutPage() {
               </span>
               <span>
                 <span className="font-display text-lg font-bold text-maroon">Call</span>
-                <span className="mt-1 block text-sm text-stone-600">{config.supportPhoneDisplay}</span>
+                <span className="mt-1 block text-sm text-stone-600">{SUPPORT_PHONE_DISPLAY}</span>
               </span>
             </div>
 
@@ -209,7 +209,7 @@ export default async function AboutPage() {
               <span>
                 <span className="font-display text-lg font-bold text-maroon">Support hours</span>
                 <span className="mt-1 block text-sm text-stone-600">
-                  {config.supportHours}. Messages left after hours are answered the
+                  Monday – Saturday, 10:00 – 19:00 IST. Messages left after hours are answered the
                   next morning.
                 </span>
               </span>

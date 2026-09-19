@@ -16,7 +16,6 @@ import {
 import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { isSupabaseConfigured } from '@/lib/env'
-import { getSiteConfig } from '@/lib/site-config'
 import { photoUrl } from '@/lib/profile/photos'
 import { ageFromDate } from '@/lib/profile/profile-schema'
 import { getActiveSubscription } from '@/lib/profile/subscription'
@@ -294,7 +293,6 @@ export default async function ProfileDashboardPage({
             <VerificationCard
               verified={Boolean(mp?.verified_at)}
               mobileVerified={Boolean(profileRes.data?.mobile_verified)}
-              mobile={profileRes.data?.mobile ?? null}
               reason={visibility?.reason ?? 'not_published'}
               pending={(() => {
                 const types = (pendingRes.data ?? []).map((r) => (r as { type: string }).type)
@@ -327,7 +325,7 @@ export default async function ProfileDashboardPage({
               <div className="flex items-center justify-between gap-3">
                 <h2 className="font-display text-lg font-bold text-maroon">Account</h2>
                 <Link
-                  href="/settings"
+                  href="/profile/settings"
                   className="text-xs font-bold text-maroon underline underline-offset-2 hover:text-maroon-dark"
                 >
                   Settings &amp; privacy

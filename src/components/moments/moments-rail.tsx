@@ -7,17 +7,6 @@ import { isSupabaseConfigured } from '@/lib/env'
 import { photoUrl } from '@/lib/profile/photos'
 import type { MomentItem, ReportReason } from '@/lib/supabase/database.types'
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const MAX_VIDEO_BYTES = 30 * 1024 * 1024
-
-const REPORT_REASONS = [
-  'inappropriate_content',
-  'fake_profile',
-  'harassment',
-  'spam',
-  'other',
-] as const
-
 /**
  * Mali Moments — 24-hour photo AND video stories.
  *
@@ -296,7 +285,7 @@ export function MomentsRail() {
               aria-label="Close"
               className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-black/50 text-white hover:bg-black/70"
             >
-              Delete this moment
+              <X className="h-4 w-4" />
             </button>
             <div className="p-4">
               <p className="flex items-center gap-1.5 text-sm font-bold text-stone-900">
@@ -391,14 +380,9 @@ export function MomentsRail() {
                 </div>
               )}
             </div>
-          )}
-          {!moment.is_mine && reportDone && (
-            <p className="mt-3 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800">
-              Reported — our team will review this moment shortly.
-            </p>
-          )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

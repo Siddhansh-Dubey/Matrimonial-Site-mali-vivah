@@ -91,25 +91,11 @@ export async function POST(req: Request) {
     if (razorpayPaymentId) {
       const { data: payment } = await admin
         .from('payments')
-        .select('id, metadata, package_id')
+        .select('id')
         .eq('razorpay_payment_id', razorpayPaymentId)
         .maybeSingle()
       if (payment) {
-        const isBoost =
-          (payment.metadata as { kind?: string } | null)?.kind === 'boost' || payment.package_id == null
-        if (isBoost) {
-          // A refunded boost ends immediately — no membership to revoke.
-          await admin
-            .from('profile_boosts')
-            .update({ status: 'cancelled', expires_at: new Date().toISOString() })
-            .eq('created_via', `purchase:${payment.id}`)
-          await admin
-            .from('payments')
-            .update({ status: 'refunded' })
-            .eq('id', payment.id)
-        } else {
-          await admin.rpc('refund_membership', { p_payment_id: payment.id })
-        }
+        await admin.rpc('refund_membership', { p_payment_id: payment.id })
       }
     }
   }

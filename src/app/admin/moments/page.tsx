@@ -8,18 +8,30 @@ export const dynamic = 'force-dynamic'
 
 export default async function AdminMomentsPage() {
   const { admin } = await requireAdminPage()
-  const [{ data: rows }, { data: reports }] = await Promise.all([
+  const [{ data: rows }, { data: openReports }] = await Promise.all([
     admin
       .from('moments')
       .select('id, user_id, media_type, storage_path, caption, expires_at, is_removed, created_at, profiles!moments_user_id_fkey(full_name)')
       .order('created_at', { ascending: false })
       .limit(100),
     admin
-      .from('moment_reports')
-      .select('id, moment_id, reason, details, created_at, moments!moment_reports_moment_id_fkey(id, user_id, is_removed, expires_at)')
+      .from('reports')
+      .select('id, target_id, reason, details, status, created_at')
+      .eq('target_type', 'moment')
+      .in('status', ['open', 'reviewing'])
       .order('created_at', { ascending: false })
       .limit(50),
   ])
+
+  // Gone-check for reported moments (target_id has no FK, so no embed —
+  // one extra lookup instead). Reports whose moment already expired or was
+  // removed show a GONE badge instead of a Remove button.
+  const targetIds = Array.from(new Set((openReports ?? []).map((r) => r.target_id).filter((t): t is string => Boolean(t))))
+  const { data: reportedMoments } = targetIds.length
+    ? await admin.from('moments').select('id, is_removed, expires_at').in('id', targetIds)
+    : { data: [] as { id: string; is_removed: boolean; expires_at: string }[] }
+  const momentById = new Map((reportedMoments ?? []).map((m) => [m.id, m]))
+  const reports = openReports ?? []
 
   return (
     <div className="space-y-6">
@@ -32,15 +44,16 @@ export default async function AdminMomentsPage() {
         </p>
       </div>
 
-      {(reports ?? []).length > 0 && (
+      {reports.length > 0 && (
         <div className="rounded-2xl border border-brand-200 bg-brand-50/50 p-5">
           <h2 className="flex items-center gap-2 font-display text-lg font-bold text-brand-900">
-            <Flag className="h-4 w-4" /> Reported moments ({reports?.length})
+            <Flag className="h-4 w-4" /> Reported moments ({reports.length})
           </h2>
           <ul className="mt-3 space-y-2.5">
-            {(reports ?? []).map((r) => {
-              const moment = r.moments as { is_removed?: boolean; expires_at?: string } | null
-              const gone = moment?.is_removed || (moment?.expires_at ? new Date(moment.expires_at) < new Date() : false)
+            {reports.map((r) => {
+              const moment = r.target_id ? momentById.get(r.target_id) : undefined
+              const gone =
+                !moment || moment.is_removed || new Date(moment.expires_at) < new Date()
               return (
                 <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-4 py-2.5 text-sm">
                   <div className="min-w-0">
@@ -57,9 +70,9 @@ export default async function AdminMomentsPage() {
                       </span>
                     )}
                   </div>
-                  {!gone && (
+                  {!gone && r.target_id && (
                     <form action={removeMoment}>
-                      <input type="hidden" name="moment_id" value={r.moment_id} />
+                      <input type="hidden" name="moment_id" value={r.target_id} />
                       <button type="submit" className="text-xs font-bold text-brand-700 hover:underline">
                         Remove moment
                       </button>
