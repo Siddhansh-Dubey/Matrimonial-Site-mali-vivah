@@ -101,6 +101,14 @@ export async function deleteMyAccount(): Promise<DeleteAccountResult> {
 
   await wipeMemberFiles(admin, user.id)
 
+  // Record the account_deleted event BEFORE removing the auth user so the
+  // user_id is still valid. The RPC is idempotent (safe if called twice).
+  try {
+    await admin.rpc('log_account_deletion', { p_reason: null as string | null })
+  } catch {
+    // Logging failure must never block deletion.
+  }
+
   const { error } = await admin.auth.admin.deleteUser(user.id)
   // "Not found" means another tab/request already deleted the account — that
   // is the outcome we want, so treat it as success and just clean the session.
