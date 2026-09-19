@@ -255,7 +255,12 @@ export default async function ProfileDashboardPage({
                     </p>
                   )}
                   <p className="mt-0.5 truncate text-sm text-stone-600">
-                    {[mp?.education, mp?.occupation].filter(Boolean).join(' · ') || 'Add your education & occupation'}
+                    {/* Career summary — business name joins as its own segment
+                        when present (separate from company, which this line
+                        has never shown — existing rows render untouched). */}
+                    {[mp?.education, mp?.occupation, mp?.business_name]
+                      .filter(Boolean)
+                      .join(' · ') || 'Add your education & occupation'}
                   </p>
                   <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-stone-500">
                     {[mp?.community?.name, mp?.sub_community_row?.name ?? mp?.sub_community]

@@ -142,6 +142,7 @@ export type Database = {
           education_details: string | null
           occupation: string | null
           company: string | null
+          business_name: string | null
           annual_income: string | null
           city: string | null
           state: string
@@ -182,6 +183,7 @@ export type Database = {
           education_details?: string | null
           occupation?: string | null
           company?: string | null
+          business_name?: string | null
           annual_income?: string | null
           city?: string | null
           state?: string
@@ -222,6 +224,7 @@ export type Database = {
           education_details?: string | null
           occupation?: string | null
           company?: string | null
+          business_name?: string | null
           annual_income?: string | null
           city?: string | null
           state?: string
@@ -1867,6 +1870,8 @@ export type PublicProfileCard = {
   education_details: string | null
   occupation: string | null
   company: string | null
+  /** Optional business the member owns — separate from `company` (the employer). get_public_profile v6, migration 20260919090000; gated exactly like `company`. */
+  business_name?: string | null
   annual_income: string | null
   city: string | null
   state: string | null

@@ -339,9 +339,15 @@ const en: Dict = {
   'profile.nativePlace': 'Native place',
   'profile.nativePlace.hint': 'Optional — the town or district your family is originally from.',
   'profile.nativePlace.placeholder': 'e.g. Satara',
-  'profile.company': 'Company / business',
-  'profile.company.hint': 'Optional — where you currently work or run your business.',
+  'profile.company': 'Company',
+  'profile.company.hint': 'Optional — the organisation you currently work for. Leave empty if you run your own business.',
   'profile.company.placeholder': 'e.g. TCS, Pune',
+  // Business Name is SEPARATE from Company: employees fill Company (their
+  // employer), business owners fill Business Name. Both may be set; both may
+  // stay empty.
+  'profile.businessName': 'Business Name',
+  'profile.businessName.hint': 'Optional — the name of the business you own or run.',
+  'profile.businessName.placeholder': 'e.g. Sharma Textiles, Nashik',
   'profile.smoking': 'Smoking',
   'profile.drinking': 'Drinking',
   'profile.family.intro': 'Tell prospective families about your household. These details appear on your biodata and to matched members.',
@@ -793,6 +799,9 @@ const mr: Dict = {
   'profile.company': 'कंपनी / संस्था',
   'profile.company.hint': 'ऐच्छिक — तुम्ही सध्या कुठे काम करता.',
   'profile.company.placeholder': 'उदा. इन्फोसिस, पुणे',
+  'profile.businessName': 'व्यवसायाचे नाव',
+  'profile.businessName.hint': 'ऐच्छिक — तुम्ही स्वतः मालक असलेल्या किंवा चालवलेल्या व्यवसायाचे नाव.',
+  'profile.businessName.placeholder': 'उदा. शर्मा टेक्सटाइल्स, नाशिक',
   'profile.annualIncome': 'वार्षिक उत्पन्न',
   'profile.family.intro': 'लग्नात कुटुंबे जोडली जातात — येथील काही ओळींमुळे समोरील कुटुंबाला तुमचे कुटुंब समजते. सर्व ऐच्छिक.',
   'profile.family.fatherOccupation': 'वडिलांचा व्यवसाय',
