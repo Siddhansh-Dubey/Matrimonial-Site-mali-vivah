@@ -101,6 +101,9 @@ export const educationSchema = z.object({
   educationDetails: z.string().optional(),
   occupation: z.string().min(1, 'required'),
   company: z.string().max(120).optional(),
+  // Own field, own limit — mirrors `company`. Optional; the wizard persists
+  // blank as NULL so the profile never stores an empty string.
+  businessName: z.string().max(120).optional(),
   annualIncome: z.string().optional(),
 })
 

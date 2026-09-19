@@ -179,6 +179,9 @@ export function ProfileWizard() {
   const [educationDetails, setEducationDetails] = useState('')
   const [occupation, setOccupation] = useState('')
   const [company, setCompany] = useState('')
+  // Separate from `company`: employees fill company (the employer), business
+  // owners fill businessName. Either, both or neither — both are optional.
+  const [businessName, setBusinessName] = useState('')
   const [annualIncome, setAnnualIncome] = useState('')
 
   // about
@@ -293,6 +296,7 @@ export function ProfileWizard() {
           setEducationDetails(profile.education_details ?? '')
           setOccupation(profile.occupation ?? '')
           setCompany(profile.company ?? '')
+          setBusinessName(profile.business_name ?? '')
           setAnnualIncome(profile.annual_income ?? '')
           setAboutMe(profile.about_me ?? '')
           setHobbies(profile.hobbies ?? [])
@@ -397,6 +401,7 @@ export function ProfileWizard() {
       education_details: educationDetails || null,
       occupation,
       company: company.trim() || null,
+      business_name: businessName.trim() || null,
       annual_income: annualIncome || null,
       about_me: aboutMe || null,
       hobbies,
@@ -487,6 +492,7 @@ export function ProfileWizard() {
         educationDetails,
         occupation,
         company,
+        businessName,
         annualIncome,
       })
       if (!r.success) {
@@ -976,6 +982,16 @@ export function ProfileWizard() {
                   onChange={(e) => setCompany(e.target.value)}
                   className="input"
                   placeholder={t('profile.company.placeholder')}
+                />
+              </Field>
+              {/* Business name is its OWN field — the company box above is
+                  never overwritten with it, and vice versa. */}
+              <Field label={t('profile.businessName')} hint={t('profile.businessName.hint')}>
+                <input
+                  value={businessName}
+                  onChange={(e) => setBusinessName(e.target.value)}
+                  className="input"
+                  placeholder={t('profile.businessName.placeholder')}
                 />
               </Field>
               <Field label={t('profile.annualIncome')}>

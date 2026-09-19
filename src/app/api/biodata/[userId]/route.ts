@@ -169,6 +169,9 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
   line('Details', mp.education_details)
   line('Occupation', mp.occupation)
   line('Company', mp.company)
+  // `line()` skips empty values, so a member without a business name never
+  // sees an empty "Business Name:" row in the PDF.
+  line('Business Name', mp.business_name)
   line('Annual income', mp.annual_income)
   rule()
 

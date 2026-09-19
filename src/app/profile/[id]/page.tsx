@@ -216,6 +216,9 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                 )}
                 <Item icon={Briefcase} label="Occupation" value={profile.occupation ?? '—'} />
                 {profile.company && <Item icon={Briefcase} label="Company" value={profile.company} />}
+                {profile.business_name && (
+                  <Item icon={Briefcase} label="Business Name" value={profile.business_name} />
+                )}
                 {profile.annual_income && (
                   <Item icon={Briefcase} label="Annual income" value={profile.annual_income} />
                 )}
