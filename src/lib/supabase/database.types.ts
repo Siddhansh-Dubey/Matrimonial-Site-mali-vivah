@@ -22,6 +22,7 @@
  * - 20260919000000_phase2_site_config_otp.sql (site_config, mobile_otps, moment_reports)
  * - 20260919010000_phase2_boost_purchase.sql  (purchased boosts, quota narrowing)
  * - 20260919020000_phase2_search_gating.sql   (sub-community joins the advanced filters)
+ * - 20260919030000_phase2_profile_whatsapp.sql (get_public_profile += whatsapp_allowed)
  *
  * If you change the SQL, update this file to match.
  */
@@ -1732,6 +1733,8 @@ export type PublicProfileCard = {
   viewer_is_paid?: boolean | null
   mutual_interest?: boolean | null
   contact_phone?: string | null
+  /** Paid + mutual AND the member opted into WhatsApp contact. */
+  whatsapp_allowed?: boolean | null
 }
 
 /** Render-ready output of profile_visibility_reason(). */

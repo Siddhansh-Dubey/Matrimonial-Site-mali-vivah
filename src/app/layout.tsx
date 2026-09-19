@@ -3,6 +3,7 @@ import './globals.css'
 import { I18nProvider } from '@/lib/i18n/provider'
 import { SiteHeader } from '@/components/layout/site-header'
 import { SiteFooter } from '@/components/layout/site-footer'
+import { getSiteConfig } from '@/lib/site-config'
 
 export const metadata: Metadata = {
   title: { default: 'Mali Vivah — Matrimony for the Mali Samaj', template: '%s | Mali Vivah' },
@@ -16,14 +17,16 @@ export const viewport: Viewport = {
   themeColor: '#c92c4b',
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Request-cached; falls back to compiled defaults when the DB is missing.
+  const config = await getSiteConfig()
   return (
     <html lang="en">
       <body className="flex min-h-dvh flex-col font-sans">
         <I18nProvider>
           <SiteHeader />
           <main className="flex-1">{children}</main>
-          <SiteFooter />
+          <SiteFooter whatsappNumber={config.supportWhatsapp} />
         </I18nProvider>
       </body>
     </html>

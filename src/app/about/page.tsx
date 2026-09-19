@@ -13,13 +13,16 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
-import { SUPPORT_EMAIL, SUPPORT_PHONE_DISPLAY, whatsappLink } from '@/lib/contact'
+import { buildWhatsappLink } from '@/lib/contact'
+import { getSiteConfig } from '@/lib/site-config'
 
 export const metadata: Metadata = {
   title: 'About Us',
   description:
     'Mali Vivah is a matrimonial platform built for the Mali Samaj — privacy-first, paid-member-visible, and honest in everything it shows you. Reach the team by email, WhatsApp or phone below.',
 }
+
+export const dynamic = 'force-dynamic'
 
 const PRINCIPLES = [
   {
@@ -54,7 +57,11 @@ const PRINCIPLES = [
   },
 ]
 
-export default function AboutPage() {
+export default async function AboutPage() {
+  // Support channels are operator-editable in /admin/settings; the compiled
+  // contact.ts defaults apply when the database is unreachable.
+  const config = await getSiteConfig()
+
   return (
     <>
       {/* 1 · About us */}
@@ -128,7 +135,7 @@ export default function AboutPage() {
 
           <div className="mx-auto mt-12 grid max-w-4xl grid-cols-1 gap-6 sm:grid-cols-2">
             <a
-              href={`mailto:${SUPPORT_EMAIL}`}
+              href={`mailto:${config.supportEmail}`}
               className="card flex items-start gap-4 p-6 transition-shadow hover:shadow-card-float"
             >
               <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-700">
@@ -137,13 +144,13 @@ export default function AboutPage() {
               <span>
                 <span className="font-display text-lg font-bold text-maroon">Email</span>
                 <span className="mt-1 block text-sm text-stone-600">
-                  {SUPPORT_EMAIL} — best for payment receipts, verification and account help.
+                  {config.supportEmail} — best for payment receipts, verification and account help.
                 </span>
               </span>
             </a>
 
             <a
-              href={whatsappLink('Namaskar, I need help with Mali Vivah')}
+              href={buildWhatsappLink(config.supportWhatsapp, 'Namaskar, I need help with Mali Vivah')}
               target="_blank"
               rel="noopener noreferrer"
               className="card flex items-start gap-4 p-6 transition-shadow hover:shadow-card-float"
@@ -165,7 +172,7 @@ export default function AboutPage() {
               </span>
               <span>
                 <span className="font-display text-lg font-bold text-maroon">Call</span>
-                <span className="mt-1 block text-sm text-stone-600">{SUPPORT_PHONE_DISPLAY}</span>
+                <span className="mt-1 block text-sm text-stone-600">{config.supportPhoneDisplay}</span>
               </span>
             </div>
 
@@ -176,7 +183,7 @@ export default function AboutPage() {
               <span>
                 <span className="font-display text-lg font-bold text-maroon">Support hours</span>
                 <span className="mt-1 block text-sm text-stone-600">
-                  Monday – Saturday, 10:00 – 19:00 IST. Messages left after hours are answered the
+                  {config.supportHours}. Messages left after hours are answered the
                   next morning.
                 </span>
               </span>

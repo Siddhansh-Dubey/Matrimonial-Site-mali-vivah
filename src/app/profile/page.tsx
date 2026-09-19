@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
+import { getSiteConfig } from '@/lib/site-config'
 import { photoUrl } from '@/lib/profile/photos'
 import { ageFromDate } from '@/lib/profile/profile-schema'
 import { getActiveSubscription } from '@/lib/profile/subscription'
@@ -43,7 +44,7 @@ export default async function ProfileDashboardPage({
   // Lazy sweep first so an expired plan is reflected truthfully this render.
   await supabase.rpc('sweep_my_membership').then(() => undefined, () => undefined)
 
-  const [profileRes, mpRes, ppRes, photoRes, subscription, visibilityRes, boostRes] = await Promise.all([
+  const [profileRes, mpRes, ppRes, photoRes, subscription, visibilityRes, boostRes, siteConfig] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
     supabase.from('matrimony_profiles').select('*').eq('user_id', user.id).maybeSingle(),
     supabase.from('partner_preferences').select('*').eq('profile_id', user.id).maybeSingle(),
@@ -51,6 +52,7 @@ export default async function ProfileDashboardPage({
     getActiveSubscription(supabase, user.id),
     supabase.rpc('profile_visibility_reason', { p_user_id: user.id }),
     supabase.rpc('has_active_boost', { p_user_id: user.id }).then((r) => r.data === true, () => false),
+    getSiteConfig(),
   ])
 
   const fullName = profileRes.data?.full_name ?? 'Member'
@@ -248,11 +250,18 @@ export default async function ProfileDashboardPage({
               />
             </div>
 
-            <BoostCard hasActive={hasBoost} status={status} isPaid={Boolean(subscription)} />
+            <BoostCard
+              hasActive={hasBoost}
+              status={status}
+              isPaid={Boolean(subscription)}
+              boostPriceInr={siteConfig.boostPriceInr}
+              boostDays={siteConfig.boostDurationDays}
+            />
 
             <VerificationCard
               verified={Boolean(mp?.verified_at)}
               mobileVerified={Boolean(profileRes.data?.mobile_verified)}
+              mobile={profileRes.data?.mobile ?? null}
               reason={visibility?.reason ?? 'not_published'}
             />
 
@@ -273,7 +282,15 @@ export default async function ProfileDashboardPage({
             </div>
 
             <div className="card p-6">
-              <h2 className="font-display text-lg font-bold text-maroon">Account</h2>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="font-display text-lg font-bold text-maroon">Account</h2>
+                <Link
+                  href="/settings"
+                  className="text-xs font-bold text-maroon underline underline-offset-2 hover:text-maroon-dark"
+                >
+                  Settings &amp; privacy
+                </Link>
+              </div>
               <dl className="mt-4 space-y-2 text-sm">
                 <Row label="Email" value={user.email ?? '—'} />
                 <Row label="Mobile" value={profileRes.data?.mobile ?? '—'} />

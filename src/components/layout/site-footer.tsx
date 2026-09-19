@@ -4,7 +4,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { Heart } from 'lucide-react'
 import { useI18n } from '@/lib/i18n/provider'
-import { whatsappLink } from '@/lib/contact'
+import { buildWhatsappLink, SUPPORT_WHATSAPP_NUMBER } from '@/lib/contact'
 
 const QUICK_LINKS = [
   { href: '/', key: 'nav.home' },
@@ -48,9 +48,12 @@ function GoldEmblem({ className = '' }: { className?: string }) {
   )
 }
 
-export function SiteFooter() {
+export function SiteFooter({ whatsappNumber }: { whatsappNumber?: string }) {
   const { t } = useI18n()
   const year = new Date().getFullYear()
+  // Operator-configured support line from the root layout; compiled default
+  // when the database value is unavailable.
+  const supportWhatsapp = whatsappNumber || SUPPORT_WHATSAPP_NUMBER
 
   return (
     <footer className="relative overflow-hidden bg-[#530c17] text-white">
@@ -124,7 +127,7 @@ export function SiteFooter() {
           <div>
             <FooterHeading>{t('footer.heading.connect')}</FooterHeading>
             <a
-              href={whatsappLink('Namaskar, I have a question about Mali Vivah')}
+              href={buildWhatsappLink(supportWhatsapp, 'Namaskar, I have a question about Mali Vivah')}
               target="_blank"
               rel="noopener noreferrer"
               className="group mt-6 inline-flex max-w-xs items-center gap-3.5 rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 transition-colors hover:border-gold-400/40 hover:bg-white/10"
