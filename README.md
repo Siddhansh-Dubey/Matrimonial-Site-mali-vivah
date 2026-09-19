@@ -51,6 +51,18 @@ SQL Editor → test register/login.
   pricing, payments (refund / manual recovery), reports, blocked users
   (searchable), boosts, moments moderation (incl. member reports), featured
   curation, stories, matching config, site content + WhatsApp config.
+- **Admin → Members** — server-side filters (status, paid/free/expired,
+  verified, featured, city, package) over one paged query, a per-member page
+  (`/admin/members/[id]`: account, profile, family, photos, membership,
+  verification, visibility, engagement, admin history) and every member
+  action as an audited, state-aware server action: approve / send back,
+  edit (allow-listed, community hierarchy validated), suspend / unsuspend,
+  hide (admin hold) / unhide, reactivate, verify, feature, boost, manual
+  paid activation and a typed-confirmation delete. Unsuspend / reactivate
+  restore the status the member's real membership implies (paid → active,
+  free → approved/hidden, lapsed → expired, draft → draft) — never a paid
+  state without a payment. See `supabase/README.md` → "Admin member
+  management".
 - **Account deletion is self-serve and immediate** — no request queue: the
   member's profile page wipes the auth user, every cascading row and all
   uploaded photos in one shot (`src/app/profile/actions.ts`).

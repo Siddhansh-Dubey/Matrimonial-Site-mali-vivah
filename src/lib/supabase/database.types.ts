@@ -20,6 +20,7 @@
  * - 20260915140000_activity_login_register.sql (registration + login activity events)
  * - 20260917000000_notification_enum_message_received.sql (notification_type += message_received)
  * - 20260917010000_chat.sql                   (conversations, conversation_members, messages + chat RPCs)
+ * - 20260919120000_admin_member_management.sql (admin hold / suspension columns, admin_* member RPCs)
  *
  * If you change the SQL, update this file to match.
  */
@@ -165,6 +166,15 @@ export type Database = {
           whatsapp_opt_in: boolean
           verified_at: string | null
           status: Database['public']['Enums']['profile_status']
+          /** Step 7 admin HOLD — set ⇒ never public, status untouched. */
+          admin_hidden_at: string | null
+          admin_hidden_by: string | null
+          admin_hidden_reason: string | null
+          /** Step 7 suspension bookkeeping (status = 'suspended'). */
+          suspended_at: string | null
+          suspended_by: string | null
+          suspension_reason: string | null
+          status_before_suspension: Database['public']['Enums']['profile_status'] | null
           created_at: string
           updated_at: string
         }
@@ -206,6 +216,13 @@ export type Database = {
           whatsapp_opt_in?: boolean
           verified_at?: string | null
           status?: Database['public']['Enums']['profile_status']
+          admin_hidden_at?: string | null
+          admin_hidden_by?: string | null
+          admin_hidden_reason?: string | null
+          suspended_at?: string | null
+          suspended_by?: string | null
+          suspension_reason?: string | null
+          status_before_suspension?: Database['public']['Enums']['profile_status'] | null
           created_at?: string
           updated_at?: string
         }
@@ -247,6 +264,13 @@ export type Database = {
           whatsapp_opt_in?: boolean
           verified_at?: string | null
           status?: Database['public']['Enums']['profile_status']
+          admin_hidden_at?: string | null
+          admin_hidden_by?: string | null
+          admin_hidden_reason?: string | null
+          suspended_at?: string | null
+          suspended_by?: string | null
+          suspension_reason?: string | null
+          status_before_suspension?: Database['public']['Enums']['profile_status'] | null
           created_at?: string
           updated_at?: string
         }
@@ -1741,6 +1765,53 @@ export type Database = {
       is_profile_completed: { Args: { p_user_id: string }; Returns: boolean }
       canonical_activity_events: { Args: Record<string, never>; Returns: string[] }
       admin_analytics: { Args: { p_days?: number | null }; Returns: Json }
+      // ---- Step 7 · admin member management (service role only) ----
+      /** Truthful snapshot of one member (status, publicity, hold, suspension, membership…). */
+      admin_member_state: { Args: { p_user_id: string }; Returns: Json }
+      /** Suspend / state-aware unsuspend. */
+      admin_set_profile_suspended: {
+        Args: { p_user_id: string; p_suspend: boolean; p_admin_id: string; p_reason?: string | null }
+        Returns: Json
+      }
+      /** Admin HOLD on / off (status, membership and payments untouched). */
+      admin_set_profile_hidden: {
+        Args: { p_user_id: string; p_hide: boolean; p_admin_id: string; p_reason?: string | null }
+        Returns: Json
+      }
+      /** State-aware reactivate — never creates membership or bypasses completion. */
+      admin_reactivate_profile: { Args: { p_user_id: string; p_admin_id: string }; Returns: Json }
+      /** draft / pending_review / rejected → hidden (free) or active (live membership). */
+      admin_approve_profile: { Args: { p_user_id: string; p_admin_id: string }; Returns: Json }
+      /** Send back for changes (status → rejected) with a member-facing note. */
+      admin_reject_profile: {
+        Args: { p_user_id: string; p_admin_id: string; p_note?: string | null }
+        Returns: Json
+      }
+      /** Allow-listed edit of profile fields, partner preferences and full_name. */
+      admin_update_member_profile: {
+        Args: { p_user_id: string; p_admin_id: string; p_profile?: Json; p_prefs?: Json }
+        Returns: Json
+      }
+      /** Guards + audit + activity BEFORE the auth user is removed. */
+      admin_prepare_member_deletion: {
+        Args: { p_user_id: string; p_admin_id: string; p_confirm_email: string; p_reason?: string | null }
+        Returns: Json
+      }
+      /** Server-side filtered / paged members list ({ total, limit, offset, rows[] }). */
+      admin_list_members: {
+        Args: {
+          p_q?: string | null
+          p_status?: string | null
+          p_paid?: string | null
+          p_verified?: string | null
+          p_featured?: string | null
+          p_city?: string | null
+          p_package?: string | null
+          p_limit?: number | null
+          p_offset?: number | null
+        }
+        Returns: Json
+      }
     }
     Enums: {
       for_whom: 'self' | 'son' | 'daughter'
@@ -1923,6 +1994,7 @@ export type VisibilityReason = {
     | 'membership_expired'
     | 'pending_review'
     | 'suspended'
+    | 'admin_hidden'
     | 'rejected'
     | 'account_inactive'
     | 'not_signed_in'

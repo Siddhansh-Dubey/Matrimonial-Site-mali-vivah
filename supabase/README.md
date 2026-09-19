@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Twenty-seven migrations, run in filename order:
+Thirty-one migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -137,6 +137,34 @@ operator-managed content, safety + analytics — run after 1–17):
     only for rows without an ID) and `get_public_profile()` v5 / search cards
     gain an additive `community` key. No table is created and the text
     column is NOT dropped.
+28. `20260919090000_profile_business_name.sql` — optional
+    `matrimony_profiles.business_name` (separate from `company`);
+    `get_public_profile()` v6 exposes it behind the same paid gate.
+29. `20260919100000_search_lifestyle_filters.sql` — `search_matches()` v5:
+    typed optional diet / smoking / drinking filters behind the existing
+    advanced-search benefit gate.
+30. `20260919110000_activity_tracking_analytics.sql` — canonical activity
+    vocabulary, idempotent lifecycle events, `log_account_deletion()` and the
+    admin-only `admin_analytics()` RPC.
+31. `20260919120000_admin_member_management.sql` — **Admin Members module
+    (Step 7).** Adds an orthogonal **admin hold** (`admin_hidden_at/_by/
+    _reason`) and suspension bookkeeping (`suspended_at/_by`,
+    `suspension_reason`, `status_before_suspension`) to `matrimony_profiles`
+    — no new `profile_status` values. `is_profile_public()` v2 requires the
+    hold to be clear (so search, Daily 5, featured, `get_public_profile()`,
+    interest and profile views all drop a hidden profile at once); the two
+    "members read active…" RLS policies are tightened the same way;
+    `profile_visibility_reason()` v2 gains the `admin_hidden` reason.
+    Service-role-only RPCs, each re-verifying the acting admin
+    (`admin_assert_actor`): `admin_member_state`, `admin_set_profile_suspended`
+    (state-aware unsuspend), `admin_set_profile_hidden`,
+    `admin_reactivate_profile`, `admin_approve_profile`, `admin_reject_profile`,
+    `admin_update_member_profile` (strict column allow-list),
+    `admin_prepare_member_deletion` (self-protection, other admins protected,
+    typed e-mail confirmation, audit + activity before the auth user is
+    removed) and `admin_list_members` (server-side filters + paging). Every
+    state change writes one `admin_audit_log` row (internal reason) and one
+    scrubbed `activity_events` row. See "Admin member management" below.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's
@@ -516,6 +544,28 @@ profile_boost_entitlements       the LEDGER: one row per grant
 * **Fail-safe** — every activation path calls `boost_duration_days()`, which
   raises `BOOST_CONFIG_MISSING` / `BOOST_CONFIG_INVALID` instead of falling
   back to a hard-coded value.
+
+## Admin member management (migration 31)
+
+The Admin → Members module never edits `matrimony_profiles.status` from the
+browser. Every action is a service-role RPC that re-checks the acting admin
+and writes the audit trail itself:
+
+| Admin action | What it does | Resulting state |
+|---|---|---|
+| Approve | `admin_approve_profile()` — only from `draft` / `pending_review` / `rejected`, requires the full publish checklist | `hidden` (APPROVED_FREE) — or `active` only when a **live** membership already exists. Never grants membership. |
+| Send back | `admin_reject_profile()` with a mandatory member-facing note | `rejected` |
+| Suspend | `admin_set_profile_suspended(…, TRUE)` — remembers the prior status | `suspended` (RLS + `is_profile_public()` drop it everywhere) |
+| Unsuspend / Reactivate | `admin_set_profile_suspended(…, FALSE)` / `admin_reactivate_profile()` — computed from the member's **real** membership | live plan → `active` (through the publish gate; an incomplete profile lands on `hidden`), lapsed → `expired`, never paid → `hidden`, never published → previous `draft` / `pending_review` / `rejected` |
+| Hide / Unhide | `admin_set_profile_hidden()` — the **admin hold** flag | `status`, membership, subscriptions and payments untouched; `is_profile_public()` is FALSE until the hold is lifted; the member's dashboard says `admin_hidden` |
+| Edit | `admin_update_member_profile()` — allow-listed columns (+ partner preferences, `full_name`); the hierarchy trigger validates community ↔ sub-community; `company` and `business_name` stay separate | unchanged status |
+| Verify / Feature / Boost / Mark paid | unchanged mechanisms (`verified_at`, `featured_profiles`, `admin_grant_boost()`, `activate_membership()`) | verified ≠ paid ≠ public; only publicly visible profiles can be newly featured; Mark paid never un-suspends |
+| Delete | `admin_prepare_member_deletion()` (refuses self and other admins, requires the exact e-mail) → storage wipe → `auth.admin.deleteUser()` | every table cascades from `profiles.id`; `admin_audit_log` (name, masked e-mail, footprint, reason) and anonymised `activity_events` survive |
+
+Activity events written for admins (`admin_member_*`,
+`admin_manual_membership_activation`) carry state facts only — members can
+read their own activity stream, so reasons, notes and admin ids live in
+`admin_audit_log` (service role only).
 
 ## Useful admin queries (matchmaking)
 
