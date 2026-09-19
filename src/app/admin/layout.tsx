@@ -3,12 +3,15 @@ import { redirect } from 'next/navigation'
 import {
   BadgeCheck,
   Banknote,
+  BarChart3,
   FileWarning,
   Gauge,
   Heart,
   Images,
   LayoutDashboard,
+  Settings,
   Settings2,
+  ShieldBan,
   Star,
   Users,
 } from 'lucide-react'
@@ -18,15 +21,18 @@ export const dynamic = 'force-dynamic'
 
 const NAV = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/admin/members', label: 'Members', icon: Users },
   { href: '/admin/verification', label: 'Verification', icon: BadgeCheck },
   { href: '/admin/packages', label: 'Packages', icon: Star },
   { href: '/admin/payments', label: 'Payments', icon: Banknote },
   { href: '/admin/reports', label: 'Reports', icon: FileWarning },
+  { href: '/admin/blocked', label: 'Blocked', icon: ShieldBan },
   { href: '/admin/moments', label: 'Moments', icon: Images },
   { href: '/admin/featured', label: 'Featured', icon: Heart },
   { href: '/admin/stories', label: 'Stories', icon: Heart },
   { href: '/admin/matching', label: 'Matching', icon: Settings2 },
+  { href: '/admin/settings', label: 'Settings', icon: Settings },
 ]
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {

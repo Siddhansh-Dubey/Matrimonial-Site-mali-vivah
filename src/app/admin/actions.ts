@@ -501,3 +501,84 @@ export async function deleteStory(formData: FormData) {
 // delete their own account directly via the server action in
 // src/app/profile/actions.ts, so admins no longer process anything — and no
 // half-deleted "pending request" state can exist in between.
+
+// ---------------------------------------------------------------------------
+// Blocks
+// ---------------------------------------------------------------------------
+
+/** Remove a member-to-member block (dispute resolution / mistaken block). */
+export async function removeBlock(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const blockId = Number(str(formData, 'block_id'))
+  if (!Number.isFinite(blockId)) throw new Error('Bad block id')
+  const { admin } = ctx
+  const { data: row } = await admin
+    .from('blocks')
+    .select('blocker_id, blocked_id')
+    .eq('id', blockId)
+    .maybeSingle()
+  const { error } = await admin.from('blocks').delete().eq('id', blockId)
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'block_remove', 'block', String(blockId), {
+    blocker_id: row?.blocker_id ?? null,
+    blocked_id: row?.blocked_id ?? null,
+  })
+  revalidatePath('/admin/blocked')
+}
+
+// ---------------------------------------------------------------------------
+// Site settings
+// ---------------------------------------------------------------------------
+
+const SITE_CONFIG_TEXT_KEYS = [
+  'support_email',
+  'support_phone_display',
+  'support_whatsapp',
+  'support_hours',
+] as const
+const SITE_CONFIG_NUMBER_KEYS = ['boost_price_inr', 'boost_duration_days'] as const
+
+/**
+ * Update operator-editable public settings (support contacts + boost
+ * pricing). Keys are allow-listed; unknown form fields are ignored.
+ */
+export async function updateSiteConfig(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const { admin } = ctx
+  const changed: Record<string, unknown> = {}
+
+  for (const key of SITE_CONFIG_TEXT_KEYS) {
+    const value = str(formData, key)
+    if (!value) continue
+    if (key === 'support_email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+      throw new Error('Support email does not look valid')
+    }
+    if (key === 'support_whatsapp' && !/^\d{10,15}$/.test(value.replace(/\D/g, ''))) {
+      throw new Error('WhatsApp number must be 10–15 digits (country code + number)')
+    }
+    const { error } = await admin
+      .from('site_config')
+      .upsert({ key, value: value as unknown as Json }, { onConflict: 'key' })
+    if (error) throw new Error(error.message)
+    changed[key] = value
+  }
+
+  for (const key of SITE_CONFIG_NUMBER_KEYS) {
+    const raw = str(formData, key)
+    if (!raw) continue
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n <= 0) throw new Error(`${key} must be a positive number`)
+    const rounded = Math.round(n)
+    const { error } = await admin
+      .from('site_config')
+      .upsert({ key, value: rounded as unknown as Json }, { onConflict: 'key' })
+    if (error) throw new Error(error.message)
+    changed[key] = rounded
+  }
+
+  await audit(ctx, 'site_config_update', 'site_config', null, changed)
+  revalidatePath('/admin/settings')
+  revalidatePath('/about')
+  revalidatePath('/')
+  revalidatePath('/profile')
+}

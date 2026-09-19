@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Seventeen migrations, run in filename order:
+Twenty-one migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -71,6 +71,28 @@ engagement, activity, messaging):
 17. `20260917010000_chat.sql` — in-app messaging: `conversations`,
     `conversation_members`, `messages`, their RLS, the ten chat RPCs, the
     triggers and the Realtime publication. Details below.
+
+Migrations 18–21 are the **Phase 2 deepening** (competitor parity + safety —
+run after 1–17):
+
+18. `20260919000000_phase2_foundation.sql` — `communities` seeds (the 10
+    sub-castes), `site_config`, mobile-verification storage (`user_otps`), the
+    photo privacy enum, `profile_boosts` price/status columns, `notification`
+    preference columns on `profiles`, `moments.media_type`, and `match_rules`
+    config. Idempotent: safe to re-run in the SQL editor.
+19. `20260919010000_phase2_profile_schema.sql` — `matrimony_profiles` gains
+    company, smoking/drinking, family detail, native-place, country and photo
+    accounting columns; photo-count trigger (1–20); search RPC gains filters
+    (`q`, Gotra, diet, manglik, star, income, complexion) and paid
+    sort/pagination caps.
+20. `20260919020000_phase2_matching_moments.sql` — DB-driven `match_config`
+    (replaces hard-coded scoring), `moment_likes`, `moment_reports`, video MIME
+    allow-list, boost purchase ledger (`boost_purchases`), +3 benefits on VIP.
+21. `20260919030000_phase2_profile_whatsapp.sql` — smart country column default
+    for existing rows, gating on `photo_visibility` / `message_privacy` (and
+    plan-gated WhatsApp), `get_safe_contact()` RPC v2 (opt-in enforced),
+    `matrimony_profiles` RLS SELECT policies, `updated_at` trigger, and
+    `match_config` verification-bonus re-seed.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's

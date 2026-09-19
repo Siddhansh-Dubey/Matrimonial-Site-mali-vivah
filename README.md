@@ -30,9 +30,14 @@ SQL Editor → test register/login.
   interest — payment alone never reveals a phone number.
 - **Payments (Razorpay)** — `/packages` checkout, server-side signature verify +
   webhook, membership auto-activates on capture; expiry self-hides, renewal restores.
-- **Daily 5 compatible matches, Mali Moments (24h), profile boosts, homepage
-  featured profiles, success stories, biodata PDF** (unlocked for the member and
-  for mutual-accepted paid viewers).
+- **Daily 5 compatible matches, Mali Moments (24h photo + video, reportable),
+  profile boosts (plan quota + à la carte purchase), homepage featured profiles,
+  success stories, biodata PDF** (unlocked for the member and for mutual-accepted
+  paid viewers).
+- **Mobile verification by SMS OTP** (MSG91 in production, dev-code fallback
+  locally), **photo + ID document** verification tracks, and a member
+  **Settings & privacy** page (paid-viewer visibility toggles, WhatsApp opt-in,
+  own block list).
 - **In-app messaging at `/messages`** — paid members with a **mutual** match
   only. Conversations, messages, read state and unread badges live in
   Supabase with RLS; writes go exclusively through SECURITY DEFINER RPCs that
@@ -41,9 +46,11 @@ SQL Editor → test register/login.
   chat, and a lapsed plan pauses messaging without deleting history.
 - **Safety** — report + block, verification requests (photo/ID reviewed in admin).
 - **Admin panel at `/admin`** — RBAC via `profiles.is_admin`, every mutation is a
-  server action audited into `admin_audit_log`: members, verification queue,
-  packages & pricing, payments (refund / manual recovery), reports, moments
-  moderation, featured curation, stories, matching config.
+  server action audited into `admin_audit_log`: dashboard, analytics (growth +
+  engagement), members, verification queue, packages & pricing, payments (refund
+  / manual recovery), reports, blocked users, moments moderation (incl. member
+  reports), featured curation, stories, matching config, site settings (support
+  channels + boost pricing).
 - **Account deletion is self-serve and immediate** — no request queue: the
   member's profile page wipes the auth user, every cascading row and all
   uploaded photos in one shot (`src/app/profile/actions.ts`).
@@ -61,7 +68,9 @@ Everyone else hitting `/admin` is redirected to `/login`.
 ## Support contact channels
 
 WhatsApp/phone/email shown in the footer + the contact section of the About page
-live in ONE place: `src/lib/contact.ts` — set the real numbers before go-live.
+are operator-editable in **Admin → Settings** (`site_config` table, seeded by
+migration `20260919000000`). The compiled fallbacks live in ONE place:
+`src/lib/contact.ts` — set the real numbers before go-live.
 (`src/app/contact/page.tsx` is only a redirect stub to `/about#contact`.)
 
 ## Database test harness
