@@ -64,16 +64,28 @@ export async function POST(req: Request) {
     }
 
     // Duplicate-charge guard: a boost already running → refuse a new order.
+    // (Should a payment still land while a boost is live — e.g. a delayed
+    // webhook after an included boost was redeemed — activate_boost_purchase()
+    // appends the purchased days after the current expiry as its own
+    // entitlement; nothing is lost or double-sold.)
     const { data: activeBoost } = await admin
       .from('profile_boosts')
-      .select('id')
+      .select('id, expires_at')
       .eq('user_id', user.id)
       .eq('status', 'active')
       .gt('expires_at', new Date().toISOString())
+      .order('expires_at', { ascending: false })
       .limit(1)
     if ((activeBoost?.length ?? 0) > 0) {
+      const till = activeBoost?.[0]?.expires_at
+        ? new Date(activeBoost[0].expires_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+        : null
       return NextResponse.json(
-        { error: 'A boost is already active on your profile — it will stack automatically on renewal.' },
+        {
+          error: till
+            ? `A boost is already active on your profile till ${till} — you can buy another once it ends.`
+            : 'A boost is already active on your profile — you can buy another once it ends.',
+        },
         { status: 409 }
       )
     }

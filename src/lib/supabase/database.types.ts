@@ -942,8 +942,10 @@ export type Database = {
           user_id: string
           status?: Database['public']['Enums']['boost_status']
           started_at?: string
-          expires_at?: string
+          /** No column default since 20260919060000 — always computed from profile_boost_config.duration_days. */
+          expires_at: string
           created_via?: string
+          /** Deprecated: the payment link lives in profile_boost_entitlements. */
           payment_id?: string | null
           created_at?: string
         }
@@ -961,6 +963,80 @@ export type Database = {
           {
             foreignKeyName: 'profile_boosts_user_id_fkey'
             columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      profile_boost_entitlements: {
+        Row: {
+          id: number
+          user_id: string
+          boost_id: number
+          source: 'package' | 'admin' | 'purchase'
+          payment_id: string | null
+          duration_days: number
+          starts_at: string
+          ends_at: string
+          status: 'granted' | 'revoked'
+          granted_by: string | null
+          created_at: string
+          revoked_at: string | null
+        }
+        Insert: {
+          id?: never
+          user_id: string
+          boost_id: number
+          source: 'package' | 'admin' | 'purchase'
+          payment_id?: string | null
+          duration_days: number
+          starts_at: string
+          ends_at: string
+          status?: 'granted' | 'revoked'
+          granted_by?: string | null
+          created_at?: string
+          revoked_at?: string | null
+        }
+        Update: {
+          id?: never
+          user_id?: string
+          boost_id?: number
+          source?: 'package' | 'admin' | 'purchase'
+          payment_id?: string | null
+          duration_days?: number
+          starts_at?: string
+          ends_at?: string
+          status?: 'granted' | 'revoked'
+          granted_by?: string | null
+          created_at?: string
+          revoked_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'profile_boost_entitlements_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'profile_boost_entitlements_boost_id_fkey'
+            columns: ['boost_id']
+            isOneToOne: false
+            referencedRelation: 'profile_boosts'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'profile_boost_entitlements_payment_id_fkey'
+            columns: ['payment_id']
+            isOneToOne: false
+            referencedRelation: 'payments'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'profile_boost_entitlements_granted_by_fkey'
+            columns: ['granted_by']
             isOneToOne: false
             referencedRelation: 'profiles'
             referencedColumns: ['id']
@@ -1567,6 +1643,13 @@ export type Database = {
       boost_my_profile: { Args: Record<string, never>; Returns: Json }
       has_active_boost: { Args: { p_user_id: string }; Returns: boolean }
       activate_boost_purchase: { Args: { p_payment_id: string }; Returns: Json }
+      /** Configured Profile Boost length (profile_boost_config.duration_days); raises when unset. */
+      boost_duration_days: { Args: Record<string, never>; Returns: number }
+      /** Service-role support grant: admin-origin entitlement for the configured duration. */
+      admin_grant_boost: {
+        Args: { p_user_id: string; p_granted_by?: string | null }
+        Returns: Json
+      }
       request_mobile_otp: { Args: Record<string, never>; Returns: Json }
       complete_mobile_otp_verification: { Args: Record<string, never>; Returns: Json }
       report_moment: {
@@ -1690,6 +1773,7 @@ export type BlockRow = Database['public']['Tables']['blocks']['Row']
 export type ReportRow = Database['public']['Tables']['reports']['Row']
 export type ActivityEventRow = Database['public']['Tables']['activity_events']['Row']
 export type ProfileBoostRow = Database['public']['Tables']['profile_boosts']['Row']
+export type ProfileBoostEntitlementRow = Database['public']['Tables']['profile_boost_entitlements']['Row']
 export type FeaturedProfileRow = Database['public']['Tables']['featured_profiles']['Row']
 export type VerificationRequestRow = Database['public']['Tables']['verification_requests']['Row']
 export type MomentRow = Database['public']['Tables']['moments']['Row']

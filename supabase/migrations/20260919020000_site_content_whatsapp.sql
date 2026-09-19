@@ -55,7 +55,7 @@ CREATE TRIGGER set_site_content_updated_at
 
 -- Seed the fixed key set (only when the row does not exist yet — admin
 -- edits are never clobbered on re-run).
-INSERT INTO public.site_content (key, title, body, sort_order) VALUES
+INSERT INTO public.site_content (key, title, body) VALUES
   (
     'home_register_cta',
     'Start your journey',

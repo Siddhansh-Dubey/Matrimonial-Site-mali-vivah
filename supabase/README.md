@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Twenty-four migrations, run in filename order:
+Twenty-five migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -85,6 +85,11 @@ operator-managed content, safety + analytics — run after 1–17):
 20. `20260919010000_boost_purchases.sql` — `profile_boost_config`
     (admin-priced à la carte boosts), the `activate_boost_purchase()` RPC
     the payments webhook calls after capture, and boost-aware refunds.
+    > The first published version of this file (and of 21 and 22) did not
+    > parse — a double-quoted `COMMENT` string / an INSERT column mismatch —
+    > so the SQL Editor rolled the whole file back. If you applied them
+    > before this note existed, re-run the corrected files: they are
+    > idempotent.
 21. `20260919020000_site_content_whatsapp.sql` — operator-managed website
     copy (`site_content`) and WhatsApp configuration (`whatsapp_config`)
     with the `get_site_content()` / `get_whatsapp_config()` readers the
@@ -100,6 +105,21 @@ operator-managed content, safety + analytics — run after 1–17):
     key to `get_public_profile()` (paid + mutual + owner opt-in), so the
     profile page can honour the member's WhatsApp toggle. Additive and
     idempotent; existing rows default to opted-out.
+25. `20260919060000_boost_entitlements.sql` — Profile Boost corrections.
+    `profile_boost_config.duration_days` becomes the single boost length
+    (`boost_duration_days()`; package, admin and purchased boosts all read
+    it, no 7-day fallback anywhere — the `profile_boosts.expires_at` column
+    default is dropped). New ledger `profile_boost_entitlements`: one row per
+    grant with its source (`package` / `admin` / `purchase`), its own time
+    slice of the visible period and — for purchases — a UNIQUE `payment_id`.
+    `boost_my_profile()` counts only package entitlements against
+    `boosts_included`; `activate_boost_purchase()` stacks by appending a new
+    slice (earlier purchases keep their identity); new service-role
+    `admin_grant_boost()`; `refund_membership()` revokes only the entitlement
+    the refunded payment bought (unconsumed remainder only, later slices
+    slide earlier) and is idempotent; the expiry notification states the
+    period's real length. Refuses to run until 20 is applied. Backfills one
+    entitlement per existing boost row. See "Profile Boost model" below.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's
@@ -437,6 +457,48 @@ renders a row it was not entitled to read. No polling is used.
 > `public.messages` and `public.conversations` are listed, and enable RLS
 > enforcement for them if your project exposes that toggle. Nothing in the app
 > depends on it, because the payloads are never rendered directly.
+
+## Profile Boost model (migration 25)
+
+```text
+profile_boost_config (id=1)      duration_days ─┐  the ONE boost length
+                                 price_inr      │  (add-on price)
+                                 is_active      │  may the add-on be SOLD? — never gates included/admin boosts
+                                                ▼
+profile_boosts                   the VISIBLE period: ≤ 1 live row per member
+  status active|expired|cancelled, started_at, expires_at, created_via (source that opened it)
+        ▲ boost_id
+profile_boost_entitlements       the LEDGER: one row per grant
+  source package|admin|purchase, payment_id (UNIQUE, purchase ⇔ NOT NULL),
+  duration_days (as configured at grant time), starts_at → ends_at (its slice),
+  status granted|revoked, granted_by, created_at (quota accounting), revoked_at
+```
+
+* **Package boost** — `boost_my_profile()` (member RPC). Paid plan required;
+  `benefits.boosts_included` is enforced per membership period by counting
+  **only** `source='package'` entitlements created since the plan started.
+  Idempotent while a boost is live. Works even when add-on purchases are off.
+* **Admin boost** — `admin_grant_boost(p_user_id, p_granted_by)` (service
+  role; called by the audited `adminGrantBoost` action). No payment, never
+  counts against the quota, refused while a boost is live
+  (`BOOST_ALREADY_ACTIVE`).
+* **Purchased boost** — order API → Razorpay → signature verify / webhook →
+  `activate_boost_purchase(p_payment_id)` (service role, idempotent per
+  payment). If a boost is live the purchased days are **appended** as a new
+  slice after the current expiry; the period's `expires_at` is extended and
+  every earlier entitlement keeps its own `payment_id`.
+* **Refund** — `refund_membership(p_payment_id)` on a `kind='boost'` payment
+  revokes exactly the entitlement that payment bought: only its **unconsumed
+  remainder** is removed from the period, later slices slide earlier (the
+  member keeps every other day they hold), package/admin/other purchases are
+  untouched, a payment without an entitlement revokes nothing, and a second
+  call is a no-op (`already_refunded`).
+* **Expiry** — `sweep_expired_memberships()` flips lapsed periods to
+  `expired` and tells the member the period's real length (stacked periods
+  are longer than one configured duration).
+* **Fail-safe** — every activation path calls `boost_duration_days()`, which
+  raises `BOOST_CONFIG_MISSING` / `BOOST_CONFIG_INVALID` instead of falling
+  back to a hard-coded value.
 
 ## Useful admin queries (matchmaking)
 

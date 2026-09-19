@@ -63,7 +63,12 @@ export default async function ProfileDashboardPage({
         .eq('status', 'pending'),
     ])
 
-  // Standalone boost add-on pricing (admin-configured; service-role read).
+  // Boost configuration (admin-configured; service-role read).
+  //  • duration_days is the ONE boost length — it applies to the included
+  //    (package) boost as much as to the purchasable add-on, so it is read
+  //    regardless of is_active.
+  //  • is_active only decides whether the standalone add-on may be SOLD.
+  let boostDurationDays: number | null = null
   let boostAddon: { priceInr: number; durationDays: number } | null = null
   try {
     const admin = createAdminClient()
@@ -72,10 +77,14 @@ export default async function ProfileDashboardPage({
       .select('price_inr, duration_days, is_active')
       .eq('id', 1)
       .maybeSingle()
-    if (cfg && cfg.is_active) {
-      boostAddon = { priceInr: cfg.price_inr, durationDays: cfg.duration_days }
+    if (cfg) {
+      boostDurationDays = cfg.duration_days
+      if (cfg.is_active) {
+        boostAddon = { priceInr: cfg.price_inr, durationDays: cfg.duration_days }
+      }
     }
   } catch {
+    boostDurationDays = null
     boostAddon = null
   }
 
@@ -287,6 +296,7 @@ export default async function ProfileDashboardPage({
               hasActive={hasBoost}
               status={status}
               isPaid={Boolean(subscription)}
+              durationDays={boostDurationDays}
               boostAddon={boostAddon}
             />
 
