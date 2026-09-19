@@ -346,7 +346,8 @@ export default async function run(db) {
   console.log(' [12] migration hygiene')
   {
     const files = migrationFiles()
-    t.check('new migration is the latest in the chain', files.at(-1) === MIGRATION)
+    t.check('business-name migration remains in the ordered chain before later steps',
+      files.includes(MIGRATION) && files.indexOf(MIGRATION) < files.length - 1)
     t.check('no historical migration was rewritten (company still comes from 20260915010000)',
       files.includes('20260915010000_profile_model_family_photo.sql'))
     const fresh = await freshDb()

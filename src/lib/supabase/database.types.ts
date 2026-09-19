@@ -10,6 +10,7 @@
  * - 20260915000000_enum_extensions.sql        (Phase 1 enums)
  * - 20260915010000_profile_model_family_photo.sql (communities, family photo, publish gate)
  * - 20260919080000_community_hierarchy_integrity.sql (hierarchy trigger, community key on cards)
+ * - 20260919100000_search_lifestyle_filters.sql (advanced diet/smoking/drinking search)
  * - 20260915020000_packages_pricing.sql       (canonical pricing, membership resolvers)
  * - 20260915030000_notifications.sql          (notifications + bell RPCs)
  * - 20260915100000_visibility.sql             (is_profile_public, visibility reason, sweeps)
@@ -1619,6 +1620,8 @@ export type Database = {
           p_min_income?: string | null
           p_min_height?: number | null
           p_max_height?: number | null
+          p_smoking?: Database['public']['Enums']['lifestyle_choice'] | null
+          p_drinking?: Database['public']['Enums']['lifestyle_choice'] | null
         }
         Returns: Json
       }

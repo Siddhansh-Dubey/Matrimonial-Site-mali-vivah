@@ -5,6 +5,7 @@ import { CalendarDays, ChevronDown, Crown, MapPin, Search, SlidersHorizontal } f
 import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
 import { BrowseGrid } from '@/components/profile/browse-grid'
+import { LifestyleFilters } from '@/components/search/lifestyle-filters'
 import { hasActiveSubscription } from '@/lib/profile/subscription'
 import {
   AGE_OPTIONS,
@@ -12,11 +13,18 @@ import {
   dietOptions,
   educationOptions,
   incomeOptions,
+  lifestyleOptions,
   maritalStatusOptions,
   occupationOptions,
 } from '@/lib/profile/profile-schema'
 import { loadCommunityHierarchy } from '@/lib/profile/community'
-import type { Diet, Gender, MaritalStatus, MatchCard as MatchCardType } from '@/lib/supabase/database.types'
+import type {
+  Diet,
+  Gender,
+  LifestyleChoice,
+  MaritalStatus,
+  MatchCard as MatchCardType,
+} from '@/lib/supabase/database.types'
 
 export const metadata: Metadata = { title: 'Search profiles' }
 export const dynamic = 'force-dynamic'
@@ -33,6 +41,8 @@ type Params = {
   nativePlace?: string
   maritalStatus?: string
   diet?: string
+  smoking?: string
+  drinking?: string
   minIncome?: string
   minHeight?: string
   maxHeight?: string
@@ -84,6 +94,12 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
     diet: (dietOptions as readonly string[]).includes(searchParams?.diet ?? '')
       ? (searchParams!.diet as Diet)
       : null,
+    smoking: (lifestyleOptions as readonly string[]).includes(searchParams?.smoking ?? '')
+      ? (searchParams!.smoking as LifestyleChoice)
+      : null,
+    drinking: (lifestyleOptions as readonly string[]).includes(searchParams?.drinking ?? '')
+      ? (searchParams!.drinking as LifestyleChoice)
+      : null,
     minIncome: searchParams?.minIncome || null,
     minHeight: parseNum(searchParams?.minHeight),
     maxHeight: parseNum(searchParams?.maxHeight),
@@ -102,6 +118,8 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
     p_native_place: advancedSearch ? adv.nativePlace : null,
     p_marital_status: advancedSearch ? adv.maritalStatus : null,
     p_diet: advancedSearch ? adv.diet : null,
+    p_smoking: advancedSearch ? adv.smoking : null,
+    p_drinking: advancedSearch ? adv.drinking : null,
     p_min_income: advancedSearch ? adv.minIncome : null,
     p_min_height: advancedSearch ? adv.minHeight : null,
     p_max_height: advancedSearch ? adv.maxHeight : null,
@@ -234,14 +252,11 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
                     ))}
                   </select>
                 </Field>
-                <Field label="Diet">
-                  <select name="diet" defaultValue={searchParams?.diet ?? ''} className="w-full appearance-none rounded-full border border-white bg-white py-2.5 pl-4 pr-9 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400">
-                    <option value="">Any</option>
-                    {dietOptions.map((o) => (
-                      <option key={o} value={o}>{titleCase(o)}</option>
-                    ))}
-                  </select>
-                </Field>
+                <LifestyleFilters
+                  diet={adv.diet}
+                  smoking={adv.smoking}
+                  drinking={adv.drinking}
+                />
                 <Field label="Min. income">
                   <select name="minIncome" defaultValue={searchParams?.minIncome ?? ''} className="w-full appearance-none rounded-full border border-white bg-white py-2.5 pl-4 pr-9 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400">
                     <option value="">Any</option>
@@ -263,8 +278,8 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
               </div>
             ) : (
               <p className="mt-3 max-w-2xl text-sm text-white/70">
-                Filter by sub-community, education, occupation, marital status, diet, income,
-                height and native place.{' '}
+                Filter by sub-community, education, occupation, marital status, diet, smoking,
+                drinking, income, height and native place.{' '}
                 <Link href="/packages" className="font-bold text-gold-300 underline underline-offset-2">
                   Upgrade to Premium or VIP
                 </Link>{' '}
