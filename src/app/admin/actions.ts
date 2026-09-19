@@ -619,15 +619,17 @@ export async function updateBoostConfig(formData: FormData) {
     throw new Error('Duration must be 1-30 days')
   }
   const { admin } = ctx
+  // Upsert (single row, id = 1) so a missing configuration row — which makes
+  // every boost path refuse to activate — can be recovered from this form.
   const { error } = await admin
     .from('profile_boost_config')
-    .update({
+    .upsert({
+      id: 1,
       price_inr: Math.round(priceInr),
       duration_days: Math.round(durationDays),
       is_active: isActive,
       updated_by: ctx.userId,
     })
-    .eq('id', 1)
   if (error) throw new Error(error.message)
   await audit(ctx, 'boost_config_update', 'profile_boost_config', '1', {
     price_inr: priceInr,
@@ -706,41 +708,48 @@ export async function setProfileHidden(formData: FormData) {
   revalidatePath('/admin/members')
 }
 
-/** Grant a 7-day boost directly (recovery/support tooling). */
+/**
+ * Grant a support boost directly (recovery/support tooling).
+ *
+ * Everything happens in admin_grant_boost() (service-role RPC): it reads the
+ * configured duration from profile_boost_config.duration_days, opens an
+ * admin-origin entitlement (no payment attached, never counted against the
+ * member's package quota), notifies the member with the real duration and
+ * writes the activity event. It refuses while a boost is already live.
+ */
 export async function adminGrantBoost(formData: FormData) {
   const ctx = await requireAdminAction()
   const targetUserId = await resolveMemberId(ctx.admin, str(formData, 'user_id'))
   const { admin } = ctx
-  const { data: existing } = await admin
-    .from('profile_boosts')
-    .select('id, expires_at')
-    .eq('user_id', targetUserId)
-    .eq('status', 'active')
-    .gt('expires_at', new Date().toISOString())
-    .limit(1)
-    .maybeSingle()
-  if (existing) throw new Error('This member already has an active boost')
+  const { data, error } = await admin.rpc('admin_grant_boost', {
+    p_user_id: targetUserId,
+    p_granted_by: ctx.userId,
+  })
+  if (error) {
+    if (error.message.includes('BOOST_ALREADY_ACTIVE')) {
+      throw new Error('This member already has an active boost')
+    }
+    if (error.message.includes('BOOST_CONFIG_MISSING') || error.message.includes('BOOST_CONFIG_INVALID')) {
+      throw new Error('Boost duration is not configured — set it under Admin → Boosts first')
+    }
+    throw new Error(error.message)
+  }
 
-  const { data: row, error } = await admin
-    .from('profile_boosts')
-    .insert({ user_id: targetUserId, status: 'active', created_via: 'admin' })
-    .select('id')
-    .single()
-  if (error) throw new Error(error.message)
-
-  await admin
-    .rpc('push_notification', {
-      p_user_id: targetUserId,
-      p_type: 'admin_message',
-      p_title: 'Profile boost activated',
-      p_message: 'Our team has activated a 7-day Profile Boost for your profile — you appear first in search while it lasts.',
-      p_metadata: {},
-      p_link: '/profile',
-    })
-    .then(() => undefined, () => undefined)
-
-  await audit(ctx, 'boost_granted', 'profile', targetUserId, { boost_id: row?.id ?? null })
+  const result = (data ?? {}) as {
+    boost_id?: number
+    entitlement_id?: number
+    duration_days?: number
+    expires_at?: string
+  }
+  await audit(ctx, 'boost_granted', 'profile', targetUserId, {
+    boost_id: result.boost_id ?? null,
+    entitlement_id: result.entitlement_id ?? null,
+    duration_days: result.duration_days ?? null,
+    expires_at: result.expires_at ?? null,
+    source: 'admin',
+  })
   revalidatePath('/admin/members')
+  revalidatePath('/admin/boosts')
 }
 
 /**

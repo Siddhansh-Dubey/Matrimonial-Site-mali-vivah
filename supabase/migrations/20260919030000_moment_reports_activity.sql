@@ -34,7 +34,7 @@ ALTER TABLE public.reports
   ADD CONSTRAINT reports_target_type_check CHECK (target_type IN ('profile', 'moment'));
 
 COMMENT ON COLUMN public.reports.target_type IS
-  "'profile' (default, historical) or 'moment' — what the report is actually about. reported_id always names the MEMBER (the profile or moment author).";
+  '''profile'' (default, historical) or ''moment'' — what the report is actually about. reported_id always names the MEMBER (the profile or moment author).';
 COMMENT ON COLUMN public.reports.target_id IS
   'For target_type=''moment'': the moments.id being reported. NULL for profile reports.';
 

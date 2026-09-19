@@ -72,7 +72,7 @@ ALTER TABLE public.payments
   ADD CONSTRAINT payments_kind_check CHECK (kind IN ('package', 'boost'));
 
 COMMENT ON COLUMN public.payments.kind IS
-  "'package' = membership purchase, 'boost' = standalone Profile Boost add-on. The verify/webhook routes branch on this to activate the right thing.";
+  '''package'' = membership purchase, ''boost'' = standalone Profile Boost add-on. The verify/webhook routes branch on this to activate the right thing.';
 
 
 -- ----------------------------------------------------------------------------

@@ -11,7 +11,7 @@ export default async function AdminPaymentsPage() {
   const [{ data: payments }, { data: subs }, { data: packages }] = await Promise.all([
     admin
       .from('payments')
-      .select('id, user_id, package_slug, amount_inr, status, razorpay_order_id, created_at, profiles!payments_user_id_fkey(full_name, email)')
+      .select('id, user_id, package_slug, kind, amount_inr, status, razorpay_order_id, created_at, profiles!payments_user_id_fkey(full_name, email)')
       .order('created_at', { ascending: false })
       .limit(100),
     admin
@@ -70,7 +70,8 @@ export default async function AdminPaymentsPage() {
             <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5">
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-stone-900">
-                  {person?.full_name ?? 'Member'} · ₹{p.amount_inr.toLocaleString('en-IN')} · {p.package_slug ?? '—'}
+                  {person?.full_name ?? 'Member'} · ₹{p.amount_inr.toLocaleString('en-IN')} ·{' '}
+                  {p.kind === 'boost' ? 'Profile Boost add-on' : (p.package_slug ?? '—')}
                 </p>
                 <p className="text-xs text-stone-500">
                   {person?.email ?? ''} · {new Date(p.created_at).toLocaleString('en-IN')}
@@ -85,7 +86,11 @@ export default async function AdminPaymentsPage() {
                 {p.status === 'captured' && (
                   <form action={refundPayment}>
                     <input type="hidden" name="payment_id" value={p.id} />
-                    <button type="submit" className="rounded-full border border-purple-300 px-3.5 py-1.5 text-xs font-bold text-purple-700 hover:bg-purple-50" title="Refund & revoke membership">
+                    <button
+                      type="submit"
+                      className="rounded-full border border-purple-300 px-3.5 py-1.5 text-xs font-bold text-purple-700 hover:bg-purple-50"
+                      title={p.kind === 'boost' ? 'Refund & revoke only the boost this payment bought' : 'Refund & revoke membership'}
+                    >
                       <RotateCcw className="mr-1 inline h-3 w-3" /> Refund
                     </button>
                   </form>

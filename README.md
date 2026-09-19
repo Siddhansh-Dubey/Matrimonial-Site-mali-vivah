@@ -76,8 +76,25 @@ numbers before go-live.
 
 ## Database test harness
 
-Repo-level PGlite harness (outside the deploy) at `mv-db-tests/` executes all 15
-migrations in both multi-statement and transaction modes and walks the full member
-lifecycle: register → biodata → photos → preferences → free-hidden → pay →
-auto-activate → appear in search → interest → accept → contact + PDF unlock →
-expiry hides → renewal restores (142 checks).
+Repo-level PGlite harness (outside the deploy — own `package.json`, never
+bundled) at `mv-db-tests/`:
+
+```bash
+cd mv-db-tests && npm install && npm test          # everything
+cd mv-db-tests && npm test -- boosts               # one suite
+```
+
+It boots an in-process Postgres (PGlite) with a minimal Supabase shim
+(`auth.users`, `auth.uid()`, the `anon` / `authenticated` / `service_role`
+roles), applies **every** file in `supabase/migrations/` in filename order —
+once as multi-statement scripts (SQL Editor style) and once wrapped in a
+transaction each — re-applies the newest file to prove it is idempotent, and
+then runs the suites in `mv-db-tests/tests/`. Tests impersonate members and
+the service role the way PostgREST does, so RLS, GRANTs and SECURITY DEFINER
+boundaries are the real ones.
+
+* `boosts.test.mjs` — the Profile Boost system (156 checks): configured
+  duration everywhere, package-quota isolation, purchase ↔ payment identity
+  under stacking, refund safety + idempotency (cases A–E), expiry wording, no
+  hard-coded 7 days, RLS/grants, account-deletion cascade, and the legacy
+  backfill of migration 25 on a pre-existing database.

@@ -11,7 +11,9 @@ import { isSupabaseConfigured } from '@/lib/env'
  *
  * Two real paths — both server-authoritative:
  *  1. INCLUDED boosts: boost_my_profile() enforces the plan's
- *     boosts_included quota (7-day boost, no payment).
+ *     boosts_included quota (no payment). The boost length is the admin-
+ *     configured profile_boost_config.duration_days — the same single value
+ *     every boost path uses; the card only echoes what the server returns.
  *  2. PURCHASED add-on: when the included quota is exhausted (or the member
  *     wants an extra boost), buy a standalone boost for the admin-configured
  *     price (profile_boost_config) through the same Razorpay order/verify/
@@ -50,6 +52,7 @@ export function BoostCard({
   hasActive,
   status,
   isPaid,
+  durationDays,
   boostAddon,
 }: {
   hasActive: boolean
@@ -57,7 +60,13 @@ export function BoostCard({
   status: string
   /** Member holds a live paid plan (server-computed). */
   isPaid: boolean
-  /** Admin-configured standalone boost add-on (null when unavailable). */
+  /**
+   * Configured boost length (profile_boost_config.duration_days) — applies to
+   * included, admin and purchased boosts alike. null when unreadable; copy
+   * then avoids naming a number rather than guessing one.
+   */
+  durationDays: number | null
+  /** Admin-configured standalone boost add-on (null when purchases are disabled). */
   boostAddon: { priceInr: number; durationDays: number } | null
 }) {
   const router = useRouter()
@@ -86,13 +95,16 @@ export function BoostCard({
         }
         return
       }
-      const res = data as { status?: string; expires_at?: string } | null
+      const res = data as { status?: string; expires_at?: string; duration_days?: number } | null
       if (res?.status === 'active' || res?.status === 'already_active') {
         setActive(true)
+        const days = res.duration_days ?? durationDays
         setMessage(
           res.status === 'already_active'
             ? 'Your boost is already running.'
-            : 'Boost activated — your profile appears first in search for the next 7 days.'
+            : days
+              ? `Boost activated — your profile appears first in search for the next ${days} days.`
+              : 'Boost activated — your profile appears first in search while it lasts.'
         )
         router.refresh()
       }
@@ -200,7 +212,9 @@ export function BoostCard({
         <p className="text-sm text-stone-600">
           {active
             ? 'Your boost is live — you appear first in Brides, Grooms and Search while it lasts.'
-            : 'Rocket your profile to the very top of Brides, Grooms and Search for 7 days.'}
+            : durationDays
+              ? `Rocket your profile to the very top of Brides, Grooms and Search for ${durationDays} days.`
+              : 'Rocket your profile to the very top of Brides, Grooms and Search.'}
         </p>
         {!active && isPaid && (
           <>
