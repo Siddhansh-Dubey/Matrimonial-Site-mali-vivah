@@ -112,7 +112,7 @@ export default async function AdminVerificationPage({
                 {r.status !== 'pending' && (
                   <div
                     className={`px-4 py-1.5 text-center text-[11px] font-bold uppercase tracking-wide ${
-                      r.status === 'approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-brand-50 text-brand-700'
+                      r.status === 'verified' ? 'bg-emerald-50 text-emerald-700' : 'bg-brand-50 text-brand-700'
                     }`}
                   >
                     {r.status}
