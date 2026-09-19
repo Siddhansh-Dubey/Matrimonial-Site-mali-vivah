@@ -48,7 +48,7 @@ export async function POST(req: Request) {
   if ((type === 'payment.captured' || type === 'payment.failed') && orderId) {
     const { data: payment } = await admin
       .from('payments')
-      .select('id, user_id, package_id, status, metadata')
+      .select('id, user_id, package_id, status, kind')
       .eq('razorpay_order_id', orderId)
       .maybeSingle()
 
@@ -60,19 +60,17 @@ export async function POST(req: Request) {
             .update({ razorpay_payment_id: paymentEntity.id })
             .eq('id', payment.id)
         }
-        const isBoost =
-          (payment.metadata as { kind?: string } | null)?.kind === 'boost' || payment.package_id == null
-        if (payment.status !== 'captured' && isBoost) {
-          await admin.rpc('activate_purchased_boost', {
-            p_user_id: payment.user_id,
-            p_payment_id: payment.id,
-          })
-        } else if (payment.status !== 'captured' && payment.package_id != null) {
-          await admin.rpc('activate_membership', {
-            p_user_id: payment.user_id,
-            p_package_id: payment.package_id,
-            p_payment_id: payment.id,
-          })
+        // Authoritative activation — branch on the payment kind.
+        if (payment.status !== 'captured') {
+          if (payment.kind === 'boost') {
+            await admin.rpc('activate_boost_purchase', { p_payment_id: payment.id })
+          } else if (payment.package_id != null) {
+            await admin.rpc('activate_membership', {
+              p_user_id: payment.user_id,
+              p_package_id: payment.package_id,
+              p_payment_id: payment.id,
+            })
+          }
         }
       } else {
         await admin

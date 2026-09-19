@@ -56,7 +56,7 @@ import type {
   PartnerPreferences,
 } from '@/lib/supabase/database.types'
 
-const STEPS = ['basic', 'education', 'family', 'about', 'preferences', 'photos'] as const
+const STEPS = ['basic', 'education', 'about', 'family', 'preferences', 'photos'] as const
 type Step = (typeof STEPS)[number]
 
 type Errors = Record<string, string | undefined>
@@ -165,10 +165,8 @@ export function ProfileWizard() {
   const [state, setState] = useState('Maharashtra')
   const [country, setCountry] = useState('India')
   const [nativePlace, setNativePlace] = useState('')
-  const [smoking, setSmoking] = useState<LifestyleChoice>('never')
-  const [drinking, setDrinking] = useState<LifestyleChoice>('never')
 
-  // education
+  // education / career
   const [education, setEducation] = useState('')
   const [educationDetails, setEducationDetails] = useState('')
   const [occupation, setOccupation] = useState('')
@@ -186,6 +184,16 @@ export function ProfileWizard() {
   // about
   const [aboutMe, setAboutMe] = useState('')
   const [hobbies, setHobbies] = useState<string[]>([])
+  const [smoking, setSmoking] = useState<LifestyleChoice>('never')
+  const [drinking, setDrinking] = useState<LifestyleChoice>('never')
+
+  // family
+  const [fatherOccupation, setFatherOccupation] = useState('')
+  const [motherOccupation, setMotherOccupation] = useState('')
+  const [siblings, setSiblings] = useState('')
+  const [familyType, setFamilyType] = useState<FamilyType>('joint')
+  const [familyLocation, setFamilyLocation] = useState('')
+  const [familyDetails, setFamilyDetails] = useState('')
 
   // preferences
   const [preferredGender, setPreferredGender] = useState<Gender>('female')
@@ -197,9 +205,17 @@ export function ProfileWizard() {
   const [preferredSubCommunities, setPreferredSubCommunities] = useState<string[]>([])
   const [preferredEducation, setPreferredEducation] = useState('')
   const [preferredOccupation, setPreferredOccupation] = useState('')
+  const [preferredIncome, setPreferredIncome] = useState('')
   const [preferredDiet, setPreferredDiet] = useState<Diet>('vegetarian')
   const [preferredMaritalStatus, setPreferredMaritalStatus] = useState<MaritalStatus>('never_married')
+  const [preferredNativePlace, setPreferredNativePlace] = useState('')
+  const [preferredFamilyType, setPreferredFamilyType] = useState<'' | FamilyType>('')
   const [prefNote, setPrefNote] = useState('')
+
+  // Community hierarchy — loaded from the database (communities →
+  // sub_communities) so the platform can grow beyond Mali without a code
+  // change. Falls back to the built-in list when the tables are absent.
+  const [subCommunities, setSubCommunities] = useState<string[]>([...subCommunityOptions])
 
   // photos — profile photos and (separately) the ONE family photo. The
   // publish gate requires both blocks before a profile can go live.
@@ -247,7 +263,7 @@ export function ProfileWizard() {
         if (profile) {
           setProfileFor(profile.profile_for)
           setGender(profile.gender ?? 'male')
-          setDateOfBirth(profile.date_of_birth ?? '')
+          setDateOfBirth(profile.date_of_birth ? profile.date_of_birth.slice(0, 10) : '')
           setHeightCm(profile.height_cm ? String(profile.height_cm) : '')
           setMaritalStatus(profile.marital_status)
           setDiet(profile.diet)
@@ -258,8 +274,6 @@ export function ProfileWizard() {
           setState(profile.state)
           setCountry(profile.country || 'India')
           setNativePlace(profile.native_place ?? '')
-          setSmoking(profile.smoking)
-          setDrinking(profile.drinking)
           setEducation(profile.education ?? '')
           setEducationDetails(profile.education_details ?? '')
           setOccupation(profile.occupation ?? '')
@@ -273,6 +287,14 @@ export function ProfileWizard() {
           setFamilyDetails(profile.family_details ?? '')
           setAboutMe(profile.about_me ?? '')
           setHobbies(profile.hobbies ?? [])
+          setSmoking(profile.smoking ?? 'never')
+          setDrinking(profile.drinking ?? 'never')
+          setFatherOccupation(profile.father_occupation ?? '')
+          setMotherOccupation(profile.mother_occupation ?? '')
+          setSiblings(profile.siblings ?? '')
+          setFamilyType(profile.family_type ?? 'joint')
+          setFamilyLocation(profile.family_location ?? '')
+          setFamilyDetails(profile.family_details ?? '')
         }
         if (prefRow) {
           setPreferredGender(prefRow.preferred_gender)
@@ -284,9 +306,23 @@ export function ProfileWizard() {
           setPreferredSubCommunities(prefRow.preferred_sub_communities ?? [])
           setPreferredEducation(prefRow.preferred_education ?? '')
           setPreferredOccupation(prefRow.preferred_occupation ?? '')
+          setPreferredIncome(prefRow.preferred_income ?? '')
           setPreferredDiet(prefRow.preferred_diet ?? 'vegetarian')
           setPreferredMaritalStatus(prefRow.preferred_marital_status ?? 'never_married')
+          setPreferredNativePlace(prefRow.preferred_native_place ?? '')
+          setPreferredFamilyType(prefRow.preferred_family_type ?? '')
           setPrefNote(prefRow.note ?? '')
+        }
+
+        // Community hierarchy from the DB (active rows, anon-readable) — the
+        // app stays data-driven so future communities need no code change.
+        const { data: subRows } = await supabase
+          .from('sub_communities')
+          .select('name')
+          .eq('is_active', true)
+          .order('sort_order', { ascending: true })
+        if (subRows && subRows.length > 0) {
+          setSubCommunities(subRows.map((r) => r.name as string))
         }
 
         // ---- resume where the user left off ----
@@ -343,14 +379,12 @@ export function ProfileWizard() {
       gotra: gotra || null,
       city,
       state,
-      country: country || 'India',
-      native_place: nativePlace || null,
-      smoking,
-      drinking,
+      country: country.trim() || 'India',
+      native_place: nativePlace.trim() || null,
       education,
       education_details: educationDetails || null,
       occupation,
-      company: company || null,
+      company: company.trim() || null,
       annual_income: annualIncome || null,
       father_occupation: fatherOccupation || null,
       mother_occupation: motherOccupation || null,
@@ -361,6 +395,15 @@ export function ProfileWizard() {
       family_details: familyDetails || null,
       about_me: aboutMe || null,
       hobbies,
+      smoking,
+      drinking,
+      // Family block (F)
+      father_occupation: fatherOccupation.trim() || null,
+      mother_occupation: motherOccupation.trim() || null,
+      siblings: siblings.trim() || null,
+      family_type: familyType,
+      family_location: familyLocation.trim() || null,
+      family_details: familyDetails.trim() || null,
       status: publish ? 'active' : 'draft',
     } as const
 
@@ -375,8 +418,11 @@ export function ProfileWizard() {
       preferred_sub_communities: preferredSubCommunities,
       preferred_education: preferredEducation || null,
       preferred_occupation: preferredOccupation || null,
+      preferred_income: preferredIncome || null,
       preferred_diet: preferredDiet,
       preferred_marital_status: preferredMaritalStatus,
+      preferred_native_place: preferredNativePlace.trim() || null,
+      preferred_family_type: preferredFamilyType || null,
       note: prefNote || null,
     } as const
 
@@ -421,8 +467,6 @@ export function ProfileWizard() {
         state,
         country,
         nativePlace,
-        smoking,
-        drinking,
       })
       if (!r.success) {
         for (const issue of r.error.issues) {
@@ -430,7 +474,13 @@ export function ProfileWizard() {
         }
       }
     } else if (s === 'education') {
-      const r = educationSchema.safeParse({ education, educationDetails, occupation, company, annualIncome })
+      const r = educationSchema.safeParse({
+        education,
+        educationDetails,
+        occupation,
+        company,
+        annualIncome,
+      })
       if (!r.success) {
         for (const issue of r.error.issues) next[issue.path[0] as string] = issue.message
       }
@@ -445,7 +495,17 @@ export function ProfileWizard() {
       })
       if (!r.success) for (const issue of r.error.issues) next[issue.path[0] as string] = issue.message
     } else if (s === 'about') {
-      const r = aboutSchema.safeParse({ aboutMe, hobbies })
+      const r = aboutSchema.safeParse({ aboutMe, hobbies, smoking, drinking })
+      if (!r.success) for (const issue of r.error.issues) next[issue.path[0] as string] = issue.message
+    } else if (s === 'family') {
+      const r = familySchema.safeParse({
+        fatherOccupation,
+        motherOccupation,
+        siblings,
+        familyType,
+        familyLocation,
+        familyDetails,
+      })
       if (!r.success) for (const issue of r.error.issues) next[issue.path[0] as string] = issue.message
     } else if (s === 'preferences') {
       const r = preferencesSchema.safeParse({
@@ -458,8 +518,11 @@ export function ProfileWizard() {
         preferredSubCommunities,
         preferredEducation,
         preferredOccupation,
+        preferredIncome,
         preferredDiet,
         preferredMaritalStatus,
+        preferredNativePlace,
+        preferredFamilyType: preferredFamilyType || undefined,
         note: prefNote,
       })
       if (!r.success) for (const issue of r.error.issues) next[issue.path[0] as string] = issue.message
@@ -680,6 +743,7 @@ export function ProfileWizard() {
     education: { icon: BookOpen, title: t('profile.step.education.title') },
     family: { icon: Home, title: t('profile.step.family.title') },
     about: { icon: Heart, title: t('profile.step.about.title') },
+    family: { icon: Home, title: t('profile.step.family.title') },
     preferences: { icon: Users, title: t('profile.step.preferences.title') },
     photos: { icon: ImagePlus, title: t('profile.step.photos.title') },
   }
@@ -809,7 +873,7 @@ export function ProfileWizard() {
                   <Select value={motherTongue} onChange={setMotherTongue} options={motherTongueOptions} />
                 </Field>
                 <Field label={t('profile.subCommunity')} error={errors.subCommunity}>
-                  <Select value={subCommunity} onChange={setSubCommunity} options={subCommunityOptions} />
+                  <Select value={subCommunity} onChange={setSubCommunity} options={subCommunities} />
                 </Field>
               </div>
 
@@ -823,8 +887,13 @@ export function ProfileWizard() {
               </div>
 
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <Field label={t('profile.country')} error={errors.country}>
-                  <input value={country} onChange={(e) => setCountry(e.target.value)} className="input" />
+                <Field label={t('profile.country')}>
+                  <input
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    className="input"
+                    placeholder="India"
+                  />
                 </Field>
                 <Field label={t('profile.nativePlace')} hint={t('profile.nativePlace.hint')}>
                   <input
@@ -832,23 +901,6 @@ export function ProfileWizard() {
                     onChange={(e) => setNativePlace(e.target.value)}
                     className="input"
                     placeholder={t('profile.nativePlace.placeholder')}
-                  />
-                </Field>
-              </div>
-
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <Field label={t('profile.smoking')}>
-                  <Select
-                    value={smoking}
-                    onChange={(v) => setSmoking(v as LifestyleChoice)}
-                    options={lifestyleOptions}
-                  />
-                </Field>
-                <Field label={t('profile.drinking')}>
-                  <Select
-                    value={drinking}
-                    onChange={(v) => setDrinking(v as LifestyleChoice)}
-                    options={lifestyleOptions}
                   />
                 </Field>
               </div>
@@ -980,6 +1032,77 @@ export function ProfileWizard() {
                   })}
                 </div>
               </Field>
+
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field label={t('profile.smoking')}>
+                  <Select value={smoking} onChange={(v) => setSmoking(v as LifestyleChoice)} options={lifestyleOptions} />
+                </Field>
+                <Field label={t('profile.drinking')}>
+                  <Select value={drinking} onChange={(v) => setDrinking(v as LifestyleChoice)} options={lifestyleOptions} />
+                </Field>
+              </div>
+            </div>
+          )}
+
+          {step === 'family' && (
+            <div className="space-y-5">
+              <p className="text-sm text-stone-600">{t('profile.family.intro')}</p>
+
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field label={t('profile.family.fatherOccupation')}>
+                  <input
+                    value={fatherOccupation}
+                    onChange={(e) => setFatherOccupation(e.target.value)}
+                    className="input"
+                    placeholder={t('profile.family.fatherOccupation.placeholder')}
+                  />
+                </Field>
+                <Field label={t('profile.family.motherOccupation')}>
+                  <input
+                    value={motherOccupation}
+                    onChange={(e) => setMotherOccupation(e.target.value)}
+                    className="input"
+                    placeholder={t('profile.family.motherOccupation.placeholder')}
+                  />
+                </Field>
+              </div>
+
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field label={t('profile.family.siblings')}>
+                  <input
+                    value={siblings}
+                    onChange={(e) => setSiblings(e.target.value)}
+                    className="input"
+                    placeholder={t('profile.family.siblings.placeholder')}
+                  />
+                </Field>
+                <Field label={t('profile.family.type')}>
+                  <Select value={familyType} onChange={(v) => setFamilyType(v as FamilyType)} options={familyTypeOptions} />
+                </Field>
+              </div>
+
+              <Field label={t('profile.family.location')}>
+                <input
+                  value={familyLocation}
+                  onChange={(e) => setFamilyLocation(e.target.value)}
+                  className="input"
+                  placeholder={t('profile.family.location.placeholder')}
+                />
+              </Field>
+
+              <Field label={t('profile.family.details')} hint={t('profile.family.details.hint')}>
+                <textarea
+                  rows={3}
+                  value={familyDetails}
+                  maxLength={500}
+                  onChange={(e) => setFamilyDetails(e.target.value)}
+                  className="input resize-none"
+                />
+              </Field>
+
+              <p className="rounded-xl bg-brand-50 px-4 py-3 text-xs text-brand-800">
+                {t('profile.family.privacyNote')}
+              </p>
             </div>
           )}
 
@@ -1018,7 +1141,7 @@ export function ProfileWizard() {
               </Field>
 
               <Field label={t('profile.pref.subCommunities')}>
-                <MultiSelect options={[...subCommunityOptions]} selected={preferredSubCommunities} onChange={setPreferredSubCommunities} />
+                <MultiSelect options={subCommunities} selected={preferredSubCommunities} onChange={setPreferredSubCommunities} />
               </Field>
 
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -1031,6 +1154,20 @@ export function ProfileWizard() {
               </div>
 
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field label={t('profile.pref.income')}>
+                  <Select value={preferredIncome} onChange={setPreferredIncome} options={incomeOptions} allowEmpty />
+                </Field>
+                <Field label={t('profile.pref.nativePlace')}>
+                  <input
+                    value={preferredNativePlace}
+                    onChange={(e) => setPreferredNativePlace(e.target.value)}
+                    className="input"
+                    placeholder={t('profile.pref.nativePlace.placeholder')}
+                  />
+                </Field>
+              </div>
+
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 <Field label={t('profile.pref.diet')}>
                   <Select value={preferredDiet} onChange={(v) => setPreferredDiet(v as Diet)} options={dietOptions} />
                 </Field>
@@ -1038,6 +1175,15 @@ export function ProfileWizard() {
                   <Select value={preferredMaritalStatus} onChange={(v) => setPreferredMaritalStatus(v as MaritalStatus)} options={maritalStatusOptions} />
                 </Field>
               </div>
+
+              <Field label={t('profile.pref.familyType')}>
+                <Select
+                  value={preferredFamilyType}
+                  onChange={(v) => setPreferredFamilyType((v || '') as '' | FamilyType)}
+                  options={familyTypeOptions}
+                  allowEmpty
+                />
+              </Field>
 
               <Field label={t('profile.pref.note')}>
                 <textarea rows={3} value={prefNote} maxLength={500} onChange={(e) => setPrefNote(e.target.value)} className="input resize-none" />

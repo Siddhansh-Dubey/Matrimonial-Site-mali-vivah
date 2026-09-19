@@ -1,78 +1,54 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowRight, HeartHandshake, MessagesSquare, UserRoundPlus } from 'lucide-react'
+import { HeartHandshake, Search, UserPlus } from 'lucide-react'
 import { useI18n } from '@/lib/i18n/provider'
-import { LeafSprig } from '@/components/home/ornaments'
 
 const STEPS = [
-  { icon: UserRoundPlus, titleKey: 'home.how.step1.title', bodyKey: 'home.how.step1.body' },
-  { icon: HeartHandshake, titleKey: 'home.how.step2.title', bodyKey: 'home.how.step2.body' },
-  { icon: MessagesSquare, titleKey: 'home.how.step3.title', bodyKey: 'home.how.step3.body' },
+  { Icon: UserPlus, key: 'home.how.step1' },
+  { Icon: Search, key: 'home.how.step2' },
+  { Icon: HeartHandshake, key: 'home.how.step3' },
 ]
 
 /**
- * "How it works" — three honest steps from registration to first contact.
- * Copy comes from the home.how.* dictionary keys (EN + Marathi).
+ * "How It Works" — the three-step journey in plain, honest language.
+ * Copy lives in the i18n dictionaries (home.how.*) so both languages stay
+ * in sync; the steps describe how the product actually works.
  */
 export function HowItWorksSection() {
   const { t } = useI18n()
-
   return (
-    <section className="relative overflow-hidden bg-cream">
-      <LeafSprig className="pointer-events-none absolute left-[4%] top-10 hidden h-24 w-12 -rotate-12 opacity-50 lg:block" />
-      <LeafSprig className="pointer-events-none absolute bottom-8 right-[4%] hidden h-24 w-12 rotate-[150deg] opacity-50 lg:block" />
-
-      <div className="container-page relative py-20 sm:py-24">
-        <div className="mx-auto max-w-2xl text-center">
-          <p className="text-[13px] font-semibold uppercase tracking-[0.34em] text-gold-600">
+    <section className="bg-white">
+      <div className="container-page py-16 sm:py-20">
+        <div className="mx-auto max-w-3xl text-center">
+          <p className="text-[13px] font-semibold uppercase tracking-[0.34em] text-gold-700">
             {t('home.how.kicker')}
           </p>
-          <h2 className="mt-3 font-display text-4xl font-bold tracking-tight text-maroon sm:text-5xl">
+          <h2 className="mt-4 font-display text-3xl font-bold text-maroon sm:text-4xl">
             {t('home.how.title')}
           </h2>
         </div>
 
-        <ol className="relative mx-auto mt-14 grid max-w-5xl gap-10 sm:grid-cols-3 sm:gap-6 lg:gap-10">
-          {/* connector line (desktop) */}
-          <span
-            aria-hidden
-            className="absolute left-[16%] right-[16%] top-9 hidden border-t-2 border-dashed border-gold-400/60 sm:block"
-          />
-          {STEPS.map((step, i) => (
-            <li key={step.titleKey} className="relative flex flex-col items-center text-center">
-              <span className="relative z-10 grid h-[72px] w-[72px] place-items-center rounded-full bg-maroon text-white shadow-lg shadow-maroon/25 ring-8 ring-cream">
-                <step.icon className="h-7 w-7" aria-hidden />
-                <span
-                  aria-hidden
-                  className="absolute -right-1.5 -top-1.5 grid h-7 w-7 place-items-center rounded-full bg-gold-400 font-display text-sm font-bold text-maroon-deep"
-                >
-                  {i + 1}
-                </span>
+        <ol className="mx-auto mt-10 grid max-w-5xl grid-cols-1 gap-5 sm:grid-cols-3">
+          {STEPS.map(({ Icon, key }, i) => (
+            <li key={key} className="card relative p-6">
+              <span className="absolute right-4 top-4 font-display text-3xl font-bold text-gold-200" aria-hidden>
+                {i + 1}
               </span>
-              <h3 className="mt-5 font-display text-xl font-bold text-stone-900">
-                {t(step.titleKey)}
+              <span className="grid h-11 w-11 place-items-center rounded-full bg-maroon text-gold-300">
+                <Icon className="h-5 w-5" aria-hidden />
+              </span>
+              <h3 className="mt-4 font-display text-lg font-bold text-stone-900">
+                {t(`${key}.title`)}
               </h3>
-              <p className="mt-2 max-w-xs text-sm leading-relaxed text-stone-600">
-                {t(step.bodyKey)}
-              </p>
+              <p className="mt-2 text-sm leading-relaxed text-stone-600">{t(`${key}.body`)}</p>
             </li>
           ))}
         </ol>
 
-        <div className="mt-12 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <Link
-            href="/register"
-            className="group inline-flex items-center justify-center gap-2 rounded-full bg-maroon px-7 py-3 text-[15px] font-semibold text-white shadow-lg shadow-maroon/25 transition-all hover:bg-maroon-dark"
-          >
-            {t('nav.register')}
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" aria-hidden />
-          </Link>
-          <Link
-            href="/search"
-            className="inline-flex items-center justify-center gap-2 rounded-full border-[1.5px] border-maroon/70 bg-white/70 px-7 py-[11px] text-[15px] font-semibold text-maroon transition-all hover:bg-maroon hover:text-white"
-          >
-            {t('home.hero.find')}
+        <div className="mt-10 text-center">
+          <Link href="/register" className="btn-primary">
+            {t('home.hero.ctaPrimary')}
           </Link>
         </div>
       </div>

@@ -4,7 +4,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { Heart } from 'lucide-react'
 import { useI18n } from '@/lib/i18n/provider'
-import { buildWhatsappLink, SUPPORT_WHATSAPP_NUMBER } from '@/lib/contact'
+import { SUPPORT_WHATSAPP_NUMBER } from '@/lib/contact'
 
 const QUICK_LINKS = [
   { href: '/', key: 'nav.home' },
@@ -48,12 +48,21 @@ function GoldEmblem({ className = '' }: { className?: string }) {
   )
 }
 
-export function SiteFooter({ whatsappNumber }: { whatsappNumber?: string }) {
+export function SiteFooter({
+  whatsappSupportNumber,
+  whatsappCommunityLink,
+}: {
+  /** Digits with country code, from the admin WhatsApp config (fallback: static). */
+  whatsappSupportNumber?: string | null
+  /** Join-community link, when an admin has set one. */
+  whatsappCommunityLink?: string | null
+}) {
   const { t } = useI18n()
   const year = new Date().getFullYear()
-  // Operator-configured support line from the root layout; compiled default
-  // when the database value is unavailable.
-  const supportWhatsapp = whatsappNumber || SUPPORT_WHATSAPP_NUMBER
+  const supportNumber = whatsappSupportNumber ?? SUPPORT_WHATSAPP_NUMBER
+  const supportLink = `https://wa.me/${supportNumber}?text=${encodeURIComponent(
+    'Namaskar, I have a question about Mali Vivah'
+  )}`
 
   return (
     <footer className="relative overflow-hidden bg-[#530c17] text-white">
@@ -127,7 +136,7 @@ export function SiteFooter({ whatsappNumber }: { whatsappNumber?: string }) {
           <div>
             <FooterHeading>{t('footer.heading.connect')}</FooterHeading>
             <a
-              href={buildWhatsappLink(supportWhatsapp, 'Namaskar, I have a question about Mali Vivah')}
+              href={supportLink}
               target="_blank"
               rel="noopener noreferrer"
               className="group mt-6 inline-flex max-w-xs items-center gap-3.5 rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 transition-colors hover:border-gold-400/40 hover:bg-white/10"
@@ -147,6 +156,27 @@ export function SiteFooter({ whatsappNumber }: { whatsappNumber?: string }) {
                 </span>
               </span>
             </a>
+
+            {whatsappCommunityLink && (
+              <a
+                href={whatsappCommunityLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group mt-4 inline-flex max-w-xs items-center gap-3.5 rounded-2xl border border-white/10 bg-white/5 px-4 py-3.5 transition-colors hover:border-gold-400/40 hover:bg-white/10"
+              >
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#25d366] text-white shadow-md">
+                  <Heart className="h-5 w-5" aria-hidden />
+                </span>
+                <span>
+                  <span className="block text-[11px] font-medium uppercase tracking-[0.14em] text-white/60">
+                    Community
+                  </span>
+                  <span className="mt-0.5 block text-sm font-bold leading-snug text-white group-hover:text-gold-300">
+                    Join the WhatsApp community
+                  </span>
+                </span>
+              </a>
+            )}
 
             <p className="mt-8 font-script text-[27px] leading-[1.2] text-gold-300/90 sm:text-[30px]">
               {t('footer.script')}

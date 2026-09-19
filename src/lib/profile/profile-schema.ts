@@ -73,6 +73,9 @@ export const HOBBY_OPTIONS = [
 const ageFromOptions = Array.from({ length: 43 }, (_, i) => 18 + i)
 export const AGE_OPTIONS = ageFromOptions
 
+export const lifestyleOptions = ['never', 'occasionally', 'regularly'] as const
+export const familyTypeOptions = ['joint', 'nuclear'] as const
+
 export const personalSchema = z.object({
   gender: z.enum(genderOptions),
   profileFor: z.enum(['self', 'son', 'daughter']),
@@ -85,17 +88,15 @@ export const personalSchema = z.object({
   gotra: z.string().optional(),
   city: z.string().min(1, 'required'),
   state: z.string().min(1, 'required'),
-  country: z.string().optional(),
-  nativePlace: z.string().max(120).optional(),
-  smoking: z.enum(lifestyleOptions),
-  drinking: z.enum(lifestyleOptions),
+  country: z.string().min(1).max(80).default('India'),
+  nativePlace: z.string().max(80).optional(),
 })
 
 export const educationSchema = z.object({
   education: z.string().min(1, 'required'),
   educationDetails: z.string().optional(),
   occupation: z.string().min(1, 'required'),
-  company: z.string().max(160).optional(),
+  company: z.string().max(120).optional(),
   annualIncome: z.string().optional(),
 })
 
@@ -111,7 +112,21 @@ export const familySchema = z.object({
 export const aboutSchema = z.object({
   aboutMe: z.string().max(1000).optional(),
   hobbies: z.array(z.string()).optional(),
+  smoking: z.enum(lifestyleOptions).default('never'),
+  drinking: z.enum(lifestyleOptions).default('never'),
 })
+
+/** The family block (PRD FAMILY section). */
+export const familySchema = z.object({
+  fatherOccupation: z.string().max(120).optional(),
+  motherOccupation: z.string().max(120).optional(),
+  siblings: z.string().max(120).optional(),
+  familyType: z.enum(familyTypeOptions).default('joint'),
+  familyLocation: z.string().max(120).optional(),
+  familyDetails: z.string().max(500).optional(),
+})
+
+export type FamilyInput = z.infer<typeof familySchema>
 
 export const preferencesSchema = z
   .object({
@@ -124,8 +139,11 @@ export const preferencesSchema = z
     preferredSubCommunities: z.array(z.string()).optional(),
     preferredEducation: z.string().optional(),
     preferredOccupation: z.string().optional(),
+    preferredIncome: z.string().optional(),
     preferredDiet: z.enum(dietOptions).optional(),
     preferredMaritalStatus: z.enum(maritalStatusOptions).optional(),
+    preferredNativePlace: z.string().max(80).optional(),
+    preferredFamilyType: z.enum(familyTypeOptions).optional(),
     note: z.string().max(500).optional(),
   })
   .refine((d) => d.minAge <= d.maxAge, {

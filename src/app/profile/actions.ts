@@ -63,7 +63,12 @@ async function collectFiles(
   return paths
 }
 
-async function wipeMemberFiles(admin: SupabaseAdmin, userId: string): Promise<void> {
+/**
+ * Recursively wipe everything a member uploaded (profile + family photos,
+ * moments, verification docs). Exported so the admin delete action can reuse
+ * the exact same logic.
+ */
+export async function wipeMemberFiles(admin: SupabaseAdmin, userId: string): Promise<void> {
   for (const bucket of MEMBER_BUCKETS) {
     try {
       const paths = await collectFiles(admin, bucket, userId, 1)

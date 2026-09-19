@@ -9,6 +9,7 @@ import {
   GraduationCap,
   Heart,
   Lock,
+  Mail,
   MapPin,
   MessageCircle,
   Phone,
@@ -350,6 +351,40 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                     ? 'Revealed only after both sides express interest in each other.'
                     : 'Visible because interest is mutual.'}
               </p>
+
+              {/* Direct contact actions — ONLY after mutual acceptance.
+                  Every value here came from the gated RPC (contact_phone /
+                  contact_email); payment alone returns null for both. */}
+              {canSeePhone && phone && (
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <a
+                    href={`tel:${phone.replace(/\D/g, '')}`}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-maroon px-3 py-2.5 text-xs font-bold text-white hover:bg-maroon-dark"
+                  >
+                    <Phone className="h-3.5 w-3.5" /> Call
+                  </a>
+                  <a
+                    href={whatsappChatLink(phone)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-3 py-2.5 text-xs font-bold text-white hover:brightness-95"
+                  >
+                    <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+                  </a>
+                  {profile.contact_email ? (
+                    <a
+                      href={`mailto:${profile.contact_email}`}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-xs font-bold text-stone-700 hover:bg-stone-100"
+                    >
+                      <Mail className="h-3.5 w-3.5" /> Email
+                    </a>
+                  ) : (
+                    <span className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-xs font-semibold text-stone-400">
+                      <Mail className="h-3.5 w-3.5" /> Email unavailable
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* biodata PDF — same gate as the phone number: paid + mutual interest */}
@@ -472,4 +507,16 @@ function Row({ label: lbl, value }: { label: string; value: string }) {
       <dd className="font-medium text-stone-800">{value}</dd>
     </div>
   )
+}
+
+/**
+ * wa.me deep link for the revealed number. Indian 10-digit numbers get the
+ * country code; anything with a country code already is used as-is.
+ */
+function whatsappChatLink(phone: string): string {
+  const digits = phone.replace(/\D/g, '')
+  const withCountry = digits.length === 10 ? `91${digits}` : digits
+  return `https://wa.me/${withCountry}?text=${encodeURIComponent(
+    'Namaskar, I came across your profile on Mali Vivah.'
+  )}`
 }

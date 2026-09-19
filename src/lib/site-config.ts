@@ -1,6 +1,6 @@
 import 'server-only'
-import { cache } from 'react'
-import { createAdminClient } from '@/lib/supabase/admin'
+
+import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
 import {
   SUPPORT_EMAIL,
@@ -9,63 +9,107 @@ import {
 } from '@/lib/contact'
 
 /**
- * Operator-editable public settings, stored in the `site_config` table and
- * edited from /admin/settings (audited). Server components read through
- * getSiteConfig(), which is request-cached and ALWAYS falls back to the
- * compiled-in contact.ts defaults — the site keeps rendering even when the
- * table (or the whole database) is missing.
+ * Authoritative, admin-managed site configuration.
+ *
+ * WhatsApp values and editable website copy live in the database
+ * (`whatsapp_config`, `site_content` — migrations 20260919020000), managed
+ * from /admin/whatsapp and /admin/content. The static values in
+ * `src/lib/contact.ts` remain ONLY as a safe fallback for environments where
+ * the tables are empty or the RPCs are not installed yet — production
+ * behaviour reads the database.
  */
 
-export type SiteConfig = {
+export type WhatsAppConfig = {
+  /** Join-the-community invite link (https://chat.whatsapp.com/…). Null until an admin sets one. */
+  communityLink: string | null
+  /** Prebuilt support chat link (https://wa.me/…). */
+  supportLink: string
+  /** Digits only, with country code (e.g. 919876543210). */
+  supportNumber: string
   supportEmail: string
   supportPhoneDisplay: string
-  supportWhatsapp: string
-  supportHours: string
-  boostPriceInr: number
-  boostDurationDays: number
+  /** True when the values came from the database (false = static fallback). */
+  fromDatabase: boolean
 }
 
-export const DEFAULT_SITE_CONFIG: SiteConfig = {
-  supportEmail: SUPPORT_EMAIL,
-  supportPhoneDisplay: SUPPORT_PHONE_DISPLAY,
-  supportWhatsapp: SUPPORT_WHATSAPP_NUMBER,
-  supportHours: 'Monday – Saturday, 10:00 – 19:00 IST',
-  boostPriceInr: 199,
-  boostDurationDays: 7,
+function staticWhatsAppConfig(): WhatsAppConfig {
+  return {
+    communityLink: null,
+    supportLink: `https://wa.me/${SUPPORT_WHATSAPP_NUMBER}`,
+    supportNumber: SUPPORT_WHATSAPP_NUMBER,
+    supportEmail: SUPPORT_EMAIL,
+    supportPhoneDisplay: SUPPORT_PHONE_DISPLAY,
+    fromDatabase: false,
+  }
 }
 
-function asString(v: unknown, fallback: string): string {
-  return typeof v === 'string' && v.trim() ? v : fallback
-}
-
-function asNumber(v: unknown, fallback: number): number {
-  const n = typeof v === 'number' ? v : Number(v)
-  return Number.isFinite(n) && n > 0 ? n : fallback
-}
-
-export const getSiteConfig = cache(async (): Promise<SiteConfig> => {
-  if (!isSupabaseConfigured) return DEFAULT_SITE_CONFIG
+/**
+ * The live WhatsApp configuration. Never throws — an unreachable database or
+ * an empty/invalid row falls back to the static constants.
+ */
+export async function getWhatsAppConfig(): Promise<WhatsAppConfig> {
+  if (!isSupabaseConfigured) return staticWhatsAppConfig()
   try {
-    const admin = createAdminClient()
-    const { data, error } = await admin.from('site_config').select('key, value')
-    if (error || !data) return DEFAULT_SITE_CONFIG
-    const map = new Map((data as { key: string; value: unknown }[]).map((r) => [r.key, r.value]))
+    const supabase = createClient()
+    const { data, error } = await supabase.rpc('get_whatsapp_config')
+    if (error) return staticWhatsAppConfig()
+    const cfg = data as {
+      community_link?: string | null
+      support_link?: string | null
+      support_number?: string | null
+    } | null
+    if (!cfg) return staticWhatsAppConfig()
+
+    const supportNumber = /^91\d{10}$/.test(cfg.support_number ?? '')
+      ? cfg.support_number!
+      : SUPPORT_WHATSAPP_NUMBER
+
+    const communityLink =
+      cfg.community_link && /^https:\/\/(chat\.whatsapp\.com|wa\.me)\/.+/.test(cfg.community_link)
+        ? cfg.community_link
+        : null
+
     return {
-      supportEmail: asString(map.get('support_email'), DEFAULT_SITE_CONFIG.supportEmail),
-      supportPhoneDisplay: asString(
-        map.get('support_phone_display'),
-        DEFAULT_SITE_CONFIG.supportPhoneDisplay
-      ),
-      supportWhatsapp: asString(map.get('support_whatsapp'), DEFAULT_SITE_CONFIG.supportWhatsapp),
-      supportHours: asString(map.get('support_hours'), DEFAULT_SITE_CONFIG.supportHours),
-      boostPriceInr: Math.round(
-        asNumber(map.get('boost_price_inr'), DEFAULT_SITE_CONFIG.boostPriceInr)
-      ),
-      boostDurationDays: Math.round(
-        asNumber(map.get('boost_duration_days'), DEFAULT_SITE_CONFIG.boostDurationDays)
-      ),
+      communityLink,
+      supportLink:
+        cfg.support_link && /^https:\/\/wa\.me\/\d+/.test(cfg.support_link)
+          ? cfg.support_link
+          : `https://wa.me/${supportNumber}`,
+      supportNumber,
+      supportEmail: SUPPORT_EMAIL,
+      supportPhoneDisplay: SUPPORT_PHONE_DISPLAY,
+      fromDatabase: true,
     }
   } catch {
-    return DEFAULT_SITE_CONFIG
+    return staticWhatsAppConfig()
   }
-})
+}
+
+/** Build a support wa.me link with a prefilled (encoded) message. */
+export function supportWhatsappLink(cfg: WhatsAppConfig, prefill?: string): string {
+  if (!prefill) return cfg.supportLink
+  return `https://wa.me/${cfg.supportNumber}?text=${encodeURIComponent(prefill)}`
+}
+
+export type ContentBlock = {
+  title: string
+  body: string
+}
+
+/**
+ * One editable copy block by key. Returns null when the block is missing or
+ * inactive so the caller renders its built-in fallback copy.
+ */
+export async function getSiteContent(key: string): Promise<ContentBlock | null> {
+  if (!isSupabaseConfigured) return null
+  try {
+    const supabase = createClient()
+    const { data, error } = await supabase.rpc('get_site_content', { p_key: key })
+    if (error) return null
+    const block = data as { title?: string | null; body?: string | null } | null
+    if (!block || !block.body) return null
+    return { title: block.title ?? '', body: block.body }
+  } catch {
+    return null
+  }
+}

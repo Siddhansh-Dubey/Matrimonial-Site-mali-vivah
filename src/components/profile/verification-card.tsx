@@ -1,25 +1,38 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { BadgeCheck, Camera, Clock, FileCheck, Loader2, ShieldCheck, Smartphone } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { BadgeCheck, Camera, Clock, IdCard, Loader2, ShieldCheck, Smartphone } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { isSupabaseConfigured } from '@/lib/env'
 
 type DocType = 'photo' | 'id_document'
 
 /**
- * Verification, three independent tracks:
- *  1. Mobile — instant, by SMS one-time passcode (sets profiles.mobile_verified).
- *  2. Photo selfie — reviewed by a person, grants the verified badge.
- *  3. ID document — reviewed by a person, also grants the verified badge.
- * Uploads land in the private `verification-docs` bucket (RLS: own folder).
+ * Verification centre (PRD D + E).
+ *
+ *  • MOBILE — real OTP flow: request + verify through the server
+ *    (/api/mobile-otp/* → Supabase phone auth, service-role). The app never
+ *    fakes an OTP; without a configured SMS provider the request endpoint
+ *    says so plainly. Success flips profiles.mobile_verified.
+ *  • PHOTO  — a fresh selfie, compared by an admin against the profile
+ *    photos. Stored in the PRIVATE verification-docs bucket (own folder).
+ *  • ID     — an optional identity document (Aadhaar/PAN/passport), same
+ *    private bucket, same admin queue. Approval sets the verified badge.
+ *
+ * One open request per (user, type) is enforced by a unique index in the
+ * database; the UI reflects that with the "under review" state.
  */
+
+type PendingTypes = { photo?: boolean; id_document?: boolean; mobile?: boolean }
+
 export function VerificationCard({
   verified,
   mobileVerified,
   mobile,
   reason,
+  pending,
+  mobileNumber,
 }: {
   verified: boolean
   mobileVerified: boolean
@@ -27,59 +40,32 @@ export function VerificationCard({
   mobile: string | null
   /** visibility reason — used only to nudge order of operations. */
   reason: string
+  /** types with an open (pending) request. */
+  pending: PendingTypes
+  /** stored mobile, displayed masked for privacy. */
+  mobileNumber: string | null
 }) {
   const router = useRouter()
-  const [busy, setBusy] = useState<DocType | null>(null)
-  const [submitted, setSubmitted] = useState<Record<DocType, boolean>>({ photo: false, id_document: false })
+  const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
 
-  // ---- mobile OTP state ----
+  // mobile OTP state
   const [otpSent, setOtpSent] = useState(false)
-  const [otpBusy, setOtpBusy] = useState<'send' | 'verify' | null>(null)
-  const [code, setCode] = useState('')
-  const [otpError, setOtpError] = useState<string | null>(null)
+  const [otp, setOtp] = useState('')
   const [cooldown, setCooldown] = useState(0)
-  const [devCode, setDevCode] = useState<string | null>(null)
-  const [mobileDone, setMobileDone] = useState(mobileVerified)
 
-  // Load outstanding request statuses so "under review" survives reloads.
-  useEffect(() => {
-    if (!isSupabaseConfigured) return
-    let cancelled = false
-    async function load() {
-      const supabase = createClient()
-      const { data: userData } = await supabase.auth.getUser()
-      const uid = userData.user?.id
-      if (!uid || cancelled) return
-      const { data } = await supabase
-        .from('verification_requests')
-        .select('type, status')
-        .eq('user_id', uid)
-        .eq('status', 'pending')
-      if (cancelled || !data) return
-      const next: Record<DocType, boolean> = { photo: false, id_document: false }
-      for (const row of data as { type: string }[]) {
-        if (row.type === 'photo' || row.type === 'id_document') next[row.type] = true
-      }
-      setSubmitted(next)
-    }
-    load()
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  // Resend cooldown ticker.
   useEffect(() => {
     if (cooldown <= 0) return
-    const t = setTimeout(() => setCooldown((c) => c - 1), 1000)
-    return () => clearTimeout(t)
+    const t = setInterval(() => setCooldown((c) => Math.max(0, c - 1)), 1000)
+    return () => clearInterval(t)
   }, [cooldown])
 
-  async function submitFile(file: File, type: DocType) {
+  async function submitDoc(file: File, type: 'photo' | 'id_document') {
     if (!isSupabaseConfigured) return
     setBusy(type)
     setError(null)
+    setInfo(null)
     try {
       const supabase = createClient()
       const { data: userData } = await supabase.auth.getUser()
@@ -94,7 +80,7 @@ export function VerificationCard({
         .from('verification-docs')
         .upload(path, file, { upsert: false })
       if (upError) {
-        setError(upError.message)
+        setError(type === 'photo' ? `Selfie upload failed: ${upError.message}` : `Document upload failed: ${upError.message}`)
         return
       }
       const { error: reqError } = await supabase.from('verification_requests').insert({
@@ -106,14 +92,69 @@ export function VerificationCard({
         await supabase.storage.from('verification-docs').remove([path])
         setError(
           reqError.message.includes('duplicate key') || reqError.message.includes('unique')
-            ? 'A verification request of this type is already under review.'
-            : reqError.message
+            ? 'A verification request is already under review.'
+            : type === 'photo'
+              ? 'Could not submit the selfie. Please try again.'
+              : 'Could not submit the document. Please try again.'
         )
         return
       }
-      setSubmitted((s) => ({ ...s, [type]: true }))
+      setInfo(type === 'photo' ? 'Selfie submitted — usually reviewed within a day.' : 'Document submitted — usually reviewed within a day.')
+      router.refresh()
     } catch {
       setError('Something went wrong. Please try again.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function requestOtp() {
+    if (!isSupabaseConfigured) return
+    setBusy('otp-request')
+    setError(null)
+    setInfo(null)
+    try {
+      const res = await fetch('/api/mobile-otp/request', { method: 'POST' })
+      const body = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) {
+        setError(body.error ?? 'Could not send the code. Please try again.')
+        return
+      }
+      setOtpSent(true)
+      setOtp('')
+      setCooldown(60)
+      setInfo(`Code sent by SMS to ${maskMobile(mobileNumber)}. It expires soon.`)
+    } catch {
+      setError('Could not send the code. Please try again.')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function verifyOtp() {
+    if (!isSupabaseConfigured || !/^\d{6}$/.test(otp)) {
+      setError('Enter the 6-digit code from the SMS.')
+      return
+    }
+    setBusy('otp-verify')
+    setError(null)
+    try {
+      const res = await fetch('/api/mobile-otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ otp }),
+      })
+      const body = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) {
+        setError(body.error ?? 'That code could not be verified. Please try again.')
+        return
+      }
+      setOtpSent(false)
+      setOtp('')
+      setInfo('Mobile number verified!')
+      router.refresh()
+    } catch {
+      setError('Could not verify the code. Please try again.')
     } finally {
       setBusy(null)
     }
@@ -198,99 +239,91 @@ export function VerificationCard({
         )}
       </div>
 
-      <div className="space-y-5 p-6 text-sm text-stone-600">
-        {/* ---- 1 · mobile ---- */}
-        <div>
-          <p className="flex items-center gap-2 font-semibold text-stone-800">
-            <span
-              className={`h-2 w-2 rounded-full ${mobileDone ? 'bg-emerald-500' : 'bg-stone-300'}`}
-              aria-hidden
-            />
-            <Smartphone className="h-4 w-4 text-stone-400" aria-hidden />
-            Mobile number {mobileDone ? 'verified' : 'not verified'}
+      <div className="space-y-4 p-6 text-sm text-stone-600">
+        {/* Mobile OTP */}
+        <div className="rounded-xl border border-stone-200 p-4">
+          <p className="flex items-center gap-2 text-sm font-semibold text-stone-900">
+            <Smartphone className="h-4 w-4 text-emerald-600" />
+            Mobile number
+            {mobileVerified ? (
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                Verified
+              </span>
+            ) : (
+              <span className="text-xs font-normal text-stone-400">
+                {mobileNumber ? maskMobile(mobileNumber) : 'not on file'}
+              </span>
+            )}
           </p>
-          {!mobileDone && (
-            <div className="mt-2.5">
-              {!mobile ? (
-                <p className="text-xs">
-                  No mobile number on your account — contact support to add one, then verify it
-                  here.
-                </p>
-              ) : !otpSent ? (
-                <>
-                  <p className="text-xs">
-                    We&apos;ll text a 6-digit code to {mobile}. It expires in 10 minutes.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={sendCode}
-                    disabled={otpBusy === 'send' || cooldown > 0}
-                    className="btn-secondary mt-2.5 inline-flex items-center gap-2 !py-2 text-xs disabled:opacity-60"
-                  >
-                    {otpBusy === 'send' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Smartphone className="h-4 w-4" />}
-                    {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Send verification code'}
-                  </button>
-                </>
+
+          {!mobileVerified && !mobileNumber && (
+            <p className="mt-2 text-xs">
+              Add your mobile number to your profile first (edit your profile), then verify it
+              here with a one-time code.
+            </p>
+          )}
+
+          {!mobileVerified && mobileNumber && (
+            <div className="mt-3 space-y-2">
+              <p className="text-xs">
+                We send a one-time code by SMS. Verify to use your number for sign-in and
+                contact.
+              </p>
+              {!otpSent ? (
+                <button
+                  type="button"
+                  onClick={requestOtp}
+                  disabled={busy !== null || cooldown > 0}
+                  className="btn-secondary inline-flex items-center gap-2 !py-2 text-xs disabled:opacity-50"
+                >
+                  {busy === 'otp-request' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Smartphone className="h-4 w-4" />}
+                  {cooldown > 0 ? `Send code (resend in ${cooldown}s)` : 'Send code'}
+                </button>
               ) : (
-                <div className="rounded-2xl bg-stone-50 p-3.5">
-                  <label className="label" htmlFor="otp-code">Enter the 6-digit code</label>
-                  <div className="mt-1.5 flex gap-2">
-                    <input
-                      id="otp-code"
-                      value={code}
-                      onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      placeholder="••••••"
-                      className="input max-w-[10rem] tracking-[0.3em] text-center font-bold"
-                    />
-                    <button
-                      type="button"
-                      onClick={verifyCode}
-                      disabled={otpBusy === 'verify'}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-maroon px-4 py-2 text-xs font-bold text-white hover:bg-maroon-dark disabled:opacity-60"
-                    >
-                      {otpBusy === 'verify' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                      Verify
-                    </button>
-                  </div>
-                  {devCode && (
-                    <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800">
-                      Dev mode — no SMS provider configured. Your code is {devCode}.
-                    </p>
-                  )}
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    inputMode="numeric"
+                    placeholder="6-digit code"
+                    aria-label="OTP code"
+                    className="input w-32 !py-2 text-sm tracking-[0.3em]"
+                  />
                   <button
                     type="button"
-                    onClick={sendCode}
-                    disabled={otpBusy === 'send' || cooldown > 0}
-                    className="mt-2 text-xs font-semibold text-maroon underline underline-offset-2 disabled:text-stone-400 disabled:no-underline"
+                    onClick={verifyOtp}
+                    disabled={busy !== null || otp.length !== 6}
+                    className="btn-primary !py-2 text-xs disabled:opacity-50"
                   >
-                    {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
+                    {busy === 'otp-verify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                    Verify
                   </button>
                 </div>
               )}
-              {otpError && <p className="mt-2 text-xs font-semibold text-brand-700">{otpError}</p>}
             </div>
           )}
         </div>
 
-        {/* ---- 2 · photo selfie ---- */}
-        <div className="border-t border-stone-100 pt-4">
-          <p className="flex items-center gap-2 font-semibold text-stone-800">
-            <span className={`h-2 w-2 rounded-full ${verified ? 'bg-emerald-500' : 'bg-stone-300'}`} aria-hidden />
-            <Camera className="h-4 w-4 text-stone-400" aria-hidden />
-            Photo verification {verified ? 'approved' : submitted.photo ? 'under review' : 'not submitted'}
+        {/* Photo verification */}
+        <div className="rounded-xl border border-stone-200 p-4">
+          <p className="flex items-center gap-2 text-sm font-semibold text-stone-900">
+            <Camera className="h-4 w-4 text-emerald-600" />
+            Photo verification
+            <span className={`h-2 w-2 rounded-full ${verified ? 'bg-emerald-500' : pending.photo ? 'bg-amber-400' : 'bg-stone-300'}`} aria-hidden />
+            <span className="text-xs font-normal text-stone-400">
+              {verified ? 'approved' : pending.photo ? 'under review' : 'not submitted'}
+            </span>
           </p>
-          {!verified && !submitted.photo && (
+          {!verified && !pending.photo && (
             <>
-              <p className="mt-1.5 text-xs">
-                {showPublishNudge
+              <p className="mt-2 text-xs">
+                {reason === 'not_published' || reason === 'profile_incomplete'
                   ? 'Publish your profile first, then request verification for the green badge.'
                   : 'Submit a fresh selfie — our team compares it with your profile photos and approves the verified badge.'}
               </p>
-              <label className="btn-secondary mt-2.5 inline-flex cursor-pointer items-center gap-2 !py-2 text-xs">
+              <label className="btn-secondary mt-3 inline-flex cursor-pointer items-center gap-2 !py-2 text-xs">
                 {busy === 'photo' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-                Submit a selfie for verification
+                Submit a selfie
                 <input
                   type="file"
                   accept="image/*"
@@ -298,59 +331,70 @@ export function VerificationCard({
                   disabled={busy !== null}
                   onChange={(e) => {
                     const f = e.target.files?.[0]
-                    if (f) submitFile(f, 'photo')
+                    if (f) submitDoc(f, 'photo')
                     e.target.value = ''
                   }}
                 />
               </label>
             </>
           )}
-          {!verified && submitted.photo && (
+          {!verified && pending.photo && (
             <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">
               <Clock className="h-3.5 w-3.5" /> Under review — usually within a day.
             </p>
           )}
         </div>
 
-        {/* ---- 3 · ID document ---- */}
-        <div className="border-t border-stone-100 pt-4">
-          <p className="flex items-center gap-2 font-semibold text-stone-800">
-            <span className={`h-2 w-2 rounded-full ${verified ? 'bg-emerald-500' : 'bg-stone-300'}`} aria-hidden />
-            <FileCheck className="h-4 w-4 text-stone-400" aria-hidden />
-            ID document {verified ? 'approved' : submitted.id_document ? 'under review' : 'not submitted'}
+        {/* ID document verification (optional) */}
+        <div className="rounded-xl border border-stone-200 p-4">
+          <p className="flex items-center gap-2 text-sm font-semibold text-stone-900">
+            <IdCard className="h-4 w-4 text-emerald-600" />
+            ID verification <span className="text-xs font-normal text-stone-400">(optional)</span>
+            <span className={`ml-auto h-2 w-2 rounded-full ${verified ? 'bg-emerald-500' : pending.id_document ? 'bg-amber-400' : 'bg-stone-300'}`} aria-hidden />
+            <span className="text-xs font-normal text-stone-400">
+              {verified ? 'approved' : pending.id_document ? 'under review' : 'not submitted'}
+            </span>
           </p>
-          {!verified && !submitted.id_document && (
+          {!verified && !pending.id_document && (
             <>
-              <p className="mt-1.5 text-xs">
-                Aadhaar, PAN, driving licence or voter ID — a photo or scan. Reviewed privately by
-                our team, never shown to other members.
+              <p className="mt-2 text-xs">
+                You can also submit a government ID (Aadhaar, PAN or passport) for additional
+                verification. The document stays private — only our review team can see it.
               </p>
-              <label className="btn-secondary mt-2.5 inline-flex cursor-pointer items-center gap-2 !py-2 text-xs">
-                {busy === 'id_document' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileCheck className="h-4 w-4" />}
-                Upload an ID document
+              <label className="btn-secondary mt-3 inline-flex cursor-pointer items-center gap-2 !py-2 text-xs">
+                {busy === 'id_document' ? <Loader2 className="h-4 w-4 animate-spin" /> : <IdCard className="h-4 w-4" />}
+                Upload ID document
                 <input
                   type="file"
-                  accept="image/*,.pdf"
+                  accept="image/*,application/pdf"
                   className="sr-only"
                   disabled={busy !== null}
                   onChange={(e) => {
                     const f = e.target.files?.[0]
-                    if (f) submitFile(f, 'id_document')
+                    if (f) submitDoc(f, 'id_document')
                     e.target.value = ''
                   }}
                 />
               </label>
             </>
           )}
-          {!verified && submitted.id_document && (
+          {!verified && pending.id_document && (
             <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800">
               <Clock className="h-3.5 w-3.5" /> Under review — usually within a day.
             </p>
           )}
         </div>
 
-        {error && <p className="text-xs font-semibold text-brand-700">{error}</p>}
+        {info && <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">{info}</p>}
+        {error && <p role="alert" className="text-xs font-semibold text-brand-700">{error}</p>}
       </div>
     </div>
   )
+}
+
+/** "98765 43210" → "98•••••43210" — never show the full number. */
+function maskMobile(mobile: string | null): string {
+  const d = (mobile ?? '').replace(/\D/g, '')
+  if (d.length < 4) return 'not on file'
+  return `${d.slice(0, 2)}•••••${d.slice(-4)}`
 }

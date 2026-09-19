@@ -40,9 +40,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Please sign in to purchase a package.' }, { status: 401 })
   }
 
-  let body: { packageSlug?: string; packageId?: number; kind?: string }
+  let body: { packageSlug?: string; packageId?: number; item?: 'package' | 'boost' }
   try {
-    body = (await req.json()) as { packageSlug?: string; packageId?: number; kind?: string }
+    body = (await req.json()) as typeof body
   } catch {
     return NextResponse.json({ error: 'Invalid request.' }, { status: 400 })
   }
@@ -57,11 +57,96 @@ export async function POST(req: Request) {
     /* non-fatal */
   }
 
-  // ---- à la carte boost purchase (no package row involved) ----
-  if (body.kind === 'boost') {
-    return await createBoostOrder(admin, user.id, user.email)
+  // ---- Standalone Profile Boost purchase (price from profile_boost_config) ----
+  if (body.item === 'boost') {
+    const { data: boostCfg } = await admin
+      .from('profile_boost_config')
+      .select('id, price_inr, duration_days, is_active')
+      .eq('id', 1)
+      .maybeSingle()
+    if (!boostCfg || boostCfg.is_active !== true) {
+      return NextResponse.json({ error: 'Boost purchases are not available right now.' }, { status: 404 })
+    }
+
+    // Duplicate-charge guard: a boost already running → refuse a new order.
+    const { data: activeBoost } = await admin
+      .from('profile_boosts')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .gt('expires_at', new Date().toISOString())
+      .limit(1)
+    if ((activeBoost?.length ?? 0) > 0) {
+      return NextResponse.json(
+        { error: 'A boost is already active on your profile — it will stack automatically on renewal.' },
+        { status: 409 }
+      )
+    }
+
+    const { data: profile } = await admin
+      .from('profiles')
+      .select('full_name, email, mobile')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    const { data: payment, error: insertError } = await admin
+      .from('payments')
+      .insert({
+        user_id: user.id,
+        kind: 'boost',
+        amount_inr: boostCfg.price_inr,
+        status: 'created',
+        metadata: { item: 'boost', duration_days: boostCfg.duration_days },
+      })
+      .select('id')
+      .single()
+    if (insertError || !payment) {
+      return NextResponse.json(
+        { error: 'Could not start the payment. Please try again.' },
+        { status: 500 }
+      )
+    }
+
+    try {
+      const order = await createRazorpayOrder({
+        amountInr: boostCfg.price_inr,
+        receipt: payment.id,
+        notes: { item: 'boost', user_id: user.id },
+      })
+      await admin
+        .from('payments')
+        .update({ razorpay_order_id: order.id })
+        .eq('id', payment.id)
+
+      return NextResponse.json({
+        keyId: razorpayKeyId(),
+        orderId: order.id,
+        amount: order.amount, // paise, as Razorpay returns
+        currency: order.currency,
+        item: 'boost',
+        itemName: `Profile Boost · ${boostCfg.duration_days} days`,
+        prefill: {
+          name: profile?.full_name ?? user.email ?? '',
+          email: profile?.email ?? user.email ?? '',
+          contact: profile?.mobile ?? '',
+        },
+      })
+    } catch (err) {
+      await admin
+        .from('payments')
+        .update({
+          status: 'failed',
+          failure_reason: err instanceof Error ? err.message : 'order creation failed',
+        })
+        .eq('id', payment.id)
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : 'Could not create the order.' },
+        { status: 502 }
+      )
+    }
   }
 
+  // ---- Membership package purchase (unchanged) ----
   // Read the package SERVER-SIDE — the client never chooses the amount.
   let pkgQuery = admin
     .from('packages')
@@ -120,6 +205,7 @@ export async function POST(req: Request) {
       orderId: order.id,
       amount: order.amount, // paise, as Razorpay returns
       currency: order.currency,
+      item: 'package',
       packageName: pkg.name,
       packageSlug: pkg.slug,
       prefill: {

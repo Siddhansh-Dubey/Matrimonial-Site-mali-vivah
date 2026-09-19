@@ -10,14 +10,17 @@ import {
   ImagePlus,
   Pencil,
   Search,
+  Settings,
   Star,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { isSupabaseConfigured } from '@/lib/env'
 import { getSiteConfig } from '@/lib/site-config'
 import { photoUrl } from '@/lib/profile/photos'
 import { ageFromDate } from '@/lib/profile/profile-schema'
 import { getActiveSubscription } from '@/lib/profile/subscription'
+import { MomentsRail } from '@/components/moments/moments-rail'
 import { VisibilityBanner } from '@/components/profile/visibility-banner'
 import { BoostCard } from '@/components/profile/boost-card'
 import { VerificationCard } from '@/components/profile/verification-card'
@@ -44,16 +47,38 @@ export default async function ProfileDashboardPage({
   // Lazy sweep first so an expired plan is reflected truthfully this render.
   await supabase.rpc('sweep_my_membership').then(() => undefined, () => undefined)
 
-  const [profileRes, mpRes, ppRes, photoRes, subscription, visibilityRes, boostRes, siteConfig] = await Promise.all([
-    supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
-    supabase.from('matrimony_profiles').select('*').eq('user_id', user.id).maybeSingle(),
-    supabase.from('partner_preferences').select('*').eq('profile_id', user.id).maybeSingle(),
-    supabase.from('profile_photos').select('*').eq('profile_id', user.id).order('sort_order'),
-    getActiveSubscription(supabase, user.id),
-    supabase.rpc('profile_visibility_reason', { p_user_id: user.id }),
-    supabase.rpc('has_active_boost', { p_user_id: user.id }).then((r) => r.data === true, () => false),
-    getSiteConfig(),
-  ])
+  const [profileRes, mpRes, ppRes, photoRes, subscription, visibilityRes, boostRes, pendingRes] =
+    await Promise.all([
+      supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+      supabase.from('matrimony_profiles').select('*').eq('user_id', user.id).maybeSingle(),
+      supabase.from('partner_preferences').select('*').eq('profile_id', user.id).maybeSingle(),
+      supabase.from('profile_photos').select('*').eq('profile_id', user.id).order('sort_order'),
+      getActiveSubscription(supabase, user.id),
+      supabase.rpc('profile_visibility_reason', { p_user_id: user.id }),
+      supabase.rpc('has_active_boost', { p_user_id: user.id }).then((r) => r.data === true, () => false),
+      // Open verification requests per type (RLS: own rows only).
+      supabase
+        .from('verification_requests')
+        .select('type')
+        .eq('user_id', user.id)
+        .eq('status', 'pending'),
+    ])
+
+  // Standalone boost add-on pricing (admin-configured; service-role read).
+  let boostAddon: { priceInr: number; durationDays: number } | null = null
+  try {
+    const admin = createAdminClient()
+    const { data: cfg } = await admin
+      .from('profile_boost_config')
+      .select('price_inr, duration_days, is_active')
+      .eq('id', 1)
+      .maybeSingle()
+    if (cfg && cfg.is_active) {
+      boostAddon = { priceInr: cfg.price_inr, durationDays: cfg.duration_days }
+    }
+  } catch {
+    boostAddon = null
+  }
 
   const fullName = profileRes.data?.full_name ?? 'Member'
   const mp = mpRes.data as MatrimonyProfile | null
@@ -87,6 +112,12 @@ export default async function ProfileDashboardPage({
   return (
     <section className="bg-cream">
       <div className="container-page py-10 sm:py-14">
+        {/* Mali Moments — top of the logged-in dashboard (24h stories,
+            photo + video, reportable, auto-expiring). */}
+        <div className="mb-10">
+          <MomentsRail />
+        </div>
+
         {/* Fresh from sign-up/verification — point straight at profile setup. */}
         {joined && (
           <div className="mx-auto mb-6 flex max-w-3xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
@@ -229,6 +260,9 @@ export default async function ProfileDashboardPage({
                 <Link href="/matches" className="btn-secondary">
                   <Star className="h-4 w-4" /> Daily 5
                 </Link>
+                <Link href="/profile/settings" className="btn-secondary">
+                  <Settings className="h-4 w-4" /> Settings & privacy
+                </Link>
               </div>
             </div>
           </div>
@@ -254,8 +288,7 @@ export default async function ProfileDashboardPage({
               hasActive={hasBoost}
               status={status}
               isPaid={Boolean(subscription)}
-              boostPriceInr={siteConfig.boostPriceInr}
-              boostDays={siteConfig.boostDurationDays}
+              boostAddon={boostAddon}
             />
 
             <VerificationCard
@@ -263,6 +296,15 @@ export default async function ProfileDashboardPage({
               mobileVerified={Boolean(profileRes.data?.mobile_verified)}
               mobile={profileRes.data?.mobile ?? null}
               reason={visibility?.reason ?? 'not_published'}
+              pending={(() => {
+                const types = (pendingRes.data ?? []).map((r) => (r as { type: string }).type)
+                return {
+                  photo: types.includes('photo'),
+                  id_document: types.includes('id_document'),
+                  mobile: types.includes('mobile'),
+                }
+              })()}
+              mobileNumber={profileRes.data?.mobile ?? null}
             />
 
             <div className="card p-6">
