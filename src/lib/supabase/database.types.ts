@@ -1620,6 +1620,8 @@ export type Database = {
         Returns: Database['public']['Enums']['membership_tier']
       }
       has_benefit: { Args: { p_key: string; p_user_id?: string | null }; Returns: boolean }
+      /** Caller's own profile-view COUNT, gated on has_benefit('profile_views'). */
+      my_profile_view_stats: { Args: Record<string, never>; Returns: Json }
       express_interest: {
         Args: { p_target_id: string; p_message?: string | null }
         Returns: Json
@@ -1898,6 +1900,20 @@ export type VisibilityReason = {
   detail: string
   cta: { label: string; href: string } | null
   expired_at?: string | null
+}
+
+/**
+ * Output of my_profile_view_stats() — the member's own profile-view COUNT.
+ * `allowed` mirrors has_benefit('profile_views'); when it is false the server
+ * returns no numbers at all (FREE tier). `who_viewed_me` is the separate
+ * visitor-list capability, exposed here only so the UI can pick the right link.
+ */
+export type ProfileViewStats = {
+  allowed: boolean
+  total: number | null
+  last_30_days: number | null
+  last_viewed_at: string | null
+  who_viewed_me: boolean
 }
 
 /** The locked PRD copy for gated membership actions. */

@@ -8,6 +8,7 @@ import {
   Eye,
   Heart,
   ImagePlus,
+  Lock,
   Pencil,
   Search,
   Settings,
@@ -24,7 +25,12 @@ import { VisibilityBanner } from '@/components/profile/visibility-banner'
 import { BoostCard } from '@/components/profile/boost-card'
 import { VerificationCard } from '@/components/profile/verification-card'
 import { DeletionCard } from '@/components/profile/deletion-card'
-import type { MatrimonyProfile, PartnerPreferences, VisibilityReason } from '@/lib/supabase/database.types'
+import type {
+  MatrimonyProfile,
+  PartnerPreferences,
+  ProfileViewStats,
+  VisibilityReason,
+} from '@/lib/supabase/database.types'
 
 export const metadata: Metadata = { title: 'My Profile' }
 
@@ -46,22 +52,35 @@ export default async function ProfileDashboardPage({
   // Lazy sweep first so an expired plan is reflected truthfully this render.
   await supabase.rpc('sweep_my_membership').then(() => undefined, () => undefined)
 
-  const [profileRes, mpRes, ppRes, photoRes, subscription, visibilityRes, boostRes, pendingRes] =
-    await Promise.all([
-      supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
-      supabase.from('matrimony_profiles').select('*').eq('user_id', user.id).maybeSingle(),
-      supabase.from('partner_preferences').select('*').eq('profile_id', user.id).maybeSingle(),
-      supabase.from('profile_photos').select('*').eq('profile_id', user.id).order('sort_order'),
-      getActiveSubscription(supabase, user.id),
-      supabase.rpc('profile_visibility_reason', { p_user_id: user.id }),
-      supabase.rpc('has_active_boost', { p_user_id: user.id }).then((r) => r.data === true, () => false),
-      // Open verification requests per type (RLS: own rows only).
-      supabase
-        .from('verification_requests')
-        .select('type')
-        .eq('user_id', user.id)
-        .eq('status', 'pending'),
-    ])
+  const [
+    profileRes,
+    mpRes,
+    ppRes,
+    photoRes,
+    subscription,
+    visibilityRes,
+    boostRes,
+    pendingRes,
+    viewStatsRes,
+  ] = await Promise.all([
+    supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
+    supabase.from('matrimony_profiles').select('*').eq('user_id', user.id).maybeSingle(),
+    supabase.from('partner_preferences').select('*').eq('profile_id', user.id).maybeSingle(),
+    supabase.from('profile_photos').select('*').eq('profile_id', user.id).order('sort_order'),
+    getActiveSubscription(supabase, user.id),
+    supabase.rpc('profile_visibility_reason', { p_user_id: user.id }),
+    supabase.rpc('has_active_boost', { p_user_id: user.id }).then((r) => r.data === true, () => false),
+    // Open verification requests per type (RLS: own rows only).
+    supabase
+      .from('verification_requests')
+      .select('type')
+      .eq('user_id', user.id)
+      .eq('status', 'pending'),
+    // Profile-view COUNT — server-authoritative. The RPC re-checks
+    // has_benefit('profile_views') and returns allowed=false / total=null to
+    // a free member, so the dashboard never holds a number it may not show.
+    supabase.rpc('my_profile_view_stats'),
+  ])
 
   // Boost configuration (admin-configured; service-role read).
   //  • duration_days is the ONE boost length — it applies to the included
@@ -100,6 +119,13 @@ export default async function ProfileDashboardPage({
   const published = searchParams?.published === '1'
   const joined = searchParams?.joined === '1'
   const visibility = visibilityRes.data as VisibilityReason | null
+  const viewStats = (viewStatsRes.data as ProfileViewStats | null) ?? {
+    allowed: false,
+    total: null,
+    last_30_days: null,
+    last_viewed_at: null,
+    who_viewed_me: false,
+  }
   const hasBoost = boostRes
 
   const status = mp?.status ?? 'draft'
@@ -284,12 +310,21 @@ export default async function ProfileDashboardPage({
                 label="New interests"
                 value={String((await countPendingInterests(supabase, user.id)))}
               />
-              <StatCard
-                href="/profile/views"
-                icon={Eye}
-                label="Profile views"
-                value={String((await countViews(supabase, user.id)))}
-              />
+              {viewStats.allowed ? (
+                <StatCard
+                  href="/profile/views"
+                  icon={Eye}
+                  label="Profile views"
+                  value={String(viewStats.total ?? 0)}
+                />
+              ) : (
+                <LockedStatCard
+                  href="/packages"
+                  icon={Eye}
+                  label="Profile views"
+                  hint="Upgrade to see how many people viewed your profile."
+                />
+              )}
             </div>
 
             <BoostCard
@@ -372,6 +407,38 @@ function Row({ label, value }: { label: string; value: string }) {
   )
 }
 
+/**
+ * Profile views for a member whose plan does not include the count. The number
+ * itself is never rendered (and never fetched — my_profile_view_stats() refuses
+ * to return it), only the upgrade path.
+ */
+function LockedStatCard({
+  href,
+  icon: Icon,
+  label,
+  hint,
+}: {
+  href: string
+  icon: typeof Heart
+  label: string
+  hint: string
+}) {
+  return (
+    <Link
+      href={href}
+      className="card flex flex-col items-center gap-1.5 p-4 text-center transition-shadow hover:shadow-card-float"
+    >
+      <span className="relative">
+        <Icon className="h-5 w-5 text-stone-400" />
+        <Lock className="absolute -right-1.5 -top-1 h-3 w-3 text-gold-600" />
+      </span>
+      <span className="font-display text-2xl font-bold text-stone-300">—</span>
+      <span className="text-xs font-medium text-stone-500">{label}</span>
+      <span className="text-[11px] leading-snug text-stone-500">{hint}</span>
+    </Link>
+  )
+}
+
 function StatCard({
   href,
   icon: Icon,
@@ -402,13 +469,5 @@ async function countPendingInterests(
     .select('id', { count: 'exact', head: true })
     .eq('receiver_id', userId)
     .eq('status', 'pending')
-  return count ?? 0
-}
-
-async function countViews(supabase: ReturnType<typeof createClient>, userId: string): Promise<number> {
-  const { count } = await supabase
-    .from('profile_views')
-    .select('id', { count: 'exact', head: true })
-    .eq('viewed_id', userId)
   return count ?? 0
 }

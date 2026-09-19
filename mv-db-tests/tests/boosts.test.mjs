@@ -28,6 +28,10 @@ import {
 } from '../lib/harness.mjs'
 
 const DAY = 86400
+// The boost-entitlement migration under test. Pinned by name: later migrations
+// (e.g. the profile-view access model) are appended to the chain over time, so
+// "the newest file" is no longer this suite's subject.
+const BOOST_MIGRATION = '20260919060000_boost_entitlements.sql'
 const DURATION = 5 // deliberately NOT 7 — proves every path reads the config
 
 // ---------------------------------------------------------------------------
@@ -565,8 +569,8 @@ export default async function boostsSuite(db) {
   console.log(' [migration] backfill of pre-existing boost rows')
   {
     const files = migrationFiles()
-    const latest = files.at(-1)
-    const older = files.slice(0, -1)
+    const latest = BOOST_MIGRATION
+    const older = files.slice(0, files.indexOf(latest))
     const db2 = await freshDb()
     try {
       await applyMigrations(db2, 'multi', older)
@@ -611,7 +615,7 @@ export default async function boostsSuite(db) {
     const db3 = await freshDb()
     try {
       await applyMigrations(db3, 'multi', files.slice(0, idx20))
-      const latest = files.at(-1)
+      const latest = BOOST_MIGRATION
       const err = await expectError(() => applyMigrations(db3, 'multi', [latest]))
       t.check('migration refuses to run without its prerequisite', err.includes('prerequisite migration 20260919010000_boost_purchases.sql'), err)
       t.equal('…and created nothing', await scalar(db3, `SELECT to_regclass('public.profile_boost_entitlements')::text AS r`), null)
@@ -621,7 +625,7 @@ export default async function boostsSuite(db) {
   }
 
   // Keep the harness honest about which files it exercised.
-  t.check('suite ran against the full migration chain', readFileSync(join(migrationsDir, migrationFiles().at(-1)), 'utf8').includes('profile_boost_entitlements'))
+  t.check('suite ran against the full migration chain', readFileSync(join(migrationsDir, BOOST_MIGRATION), 'utf8').includes('profile_boost_entitlements'))
 
   return t
 }

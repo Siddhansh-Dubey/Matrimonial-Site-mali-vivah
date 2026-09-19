@@ -10,10 +10,15 @@ export const metadata: Metadata = { title: 'Who viewed me' }
 export const dynamic = 'force-dynamic'
 
 /**
- * "Who viewed your profile" — the Premium/VIP benefit gate. Owned viewer rows
- * only (RLS: viewed_id = auth.uid()). Viewer names stay masked until THEY too
- * match the paid+mutual rule on their own profile — this list only says who
- * looked, never their contact details.
+ * "Who viewed your profile" — the individual VISITOR LIST, gated on the
+ * who_viewed_me benefit (distinct from the profile_views count benefit shown
+ * on the dashboard).
+ *
+ * The check below is a UI convenience only: RLS on profile_views now requires
+ * BOTH viewed_id = auth.uid() AND has_benefit('who_viewed_me', auth.uid()), so
+ * a free member — or a paid plan without the benefit — reads zero rows even if
+ * they query PostgREST directly. Viewer names stay masked and no contact
+ * details are ever selected; this list only says who looked, and when.
  */
 export default async function ProfileViewsPage() {
   if (!isSupabaseConfigured) redirect('/login')
