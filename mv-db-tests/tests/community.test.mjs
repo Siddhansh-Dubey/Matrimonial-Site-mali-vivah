@@ -222,8 +222,14 @@ export default async function run(db) {
     t.equal('...and reports no community (none linked)', card?.community ?? null, null)
 
     console.log(' [8] legacy text maps to the proper DB row')
-    // (a) the migration's backfill, re-applied idempotently
-    await applyMigrations(db, 'multi', [MIGRATION])
+    // (a) the migration's backfill, re-applied idempotently. Re-applying this
+    // historical migration also recreates its then-current search RPC, so
+    // immediately re-apply the latest search migration just as the ordered
+    // migration chain does (avoids retaining a stale overload in this test DB).
+    await applyMigrations(db, 'multi', [
+      MIGRATION,
+      '20260919100000_search_lifestyle_filters.sql',
+    ])
     const r2 = await row(db, u)
     t.equal('backfill links legacy text to Phul Mali', [r2.sub_community_id, r2.community_id], [bySlug['phul-mali'].id, mali.id])
     // (b) resolution at write time (CASE B: community known, text present)
