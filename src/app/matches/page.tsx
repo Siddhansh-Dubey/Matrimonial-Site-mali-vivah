@@ -5,7 +5,6 @@ import { BadgeCheck, CalendarDays, Crown, Heart, Rocket, Star } from 'lucide-rea
 import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
 import { photoUrl } from '@/lib/profile/photos'
-import { MomentsRail } from '@/components/moments/moments-rail'
 import type { MatchCard } from '@/lib/supabase/database.types'
 
 export const metadata: Metadata = { title: 'Daily matches' }
@@ -71,9 +70,8 @@ export default async function MatchesPage() {
           </ul>
         )}
 
-        <div className="mt-14">
-          <MomentsRail />
-        </div>
+        {/* Mali Moments live at the top of the My Profile dashboard —
+            the Daily 5 page stays focused on matches. */}
       </div>
     </section>
   )

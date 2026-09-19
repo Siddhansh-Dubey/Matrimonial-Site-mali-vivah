@@ -63,7 +63,9 @@ export function SearchMatchesSection() {
               </span>
             </div>
 
-            <div className="mt-7 grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2 lg:grid-cols-[1.15fr_0.85fr_0.85fr_0.95fr_1.25fr_auto] lg:items-end">
+            {/* Basic search only: bride/groom, age, location. The
+                sub-community filter lives in the advanced (paid) search. */}
+            <div className="mt-7 grid grid-cols-1 gap-x-5 gap-y-5 sm:grid-cols-2 lg:grid-cols-[1.15fr_0.85fr_0.85fr_0.95fr_auto] lg:items-end">
               {/* Looking for */}
               <div>
                 <span className="label-white">{t('home.search.lookingFor')}</span>
@@ -102,15 +104,6 @@ export function SearchMatchesSection() {
                   placeholder={t('home.search.selectCity')}
                   options={['Mumbai', 'Pune', 'Nashik', 'Nagpur', 'Thane', 'Aurangabad', 'Solapur', 'Other']}
                   icon={<MapPin className="h-4 w-4 text-maroon/60" aria-hidden />}
-                />
-              </Field>
-
-              {/* Sub-community */}
-              <Field label={t('home.search.subCommunity')}>
-                <Select
-                  name="subCommunity"
-                  placeholder={t('home.search.selectSubCommunity')}
-                  options={['Mali', 'Phul Mali', 'Maratha Mali', 'Lal Mali', 'Other']}
                 />
               </Field>
 

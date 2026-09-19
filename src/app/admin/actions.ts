@@ -497,7 +497,278 @@ export async function deleteStory(formData: FormData) {
   revalidatePath('/success-stories/submit')
 }
 
-// NOTE: the old "account deletion request queue" lived here. Members now
-// delete their own account directly via the server action in
-// src/app/profile/actions.ts, so admins no longer process anything — and no
-// half-deleted "pending request" state can exist in between.
+// ---------------------------------------------------------------------------
+// Blocked users (PRD L)
+// ---------------------------------------------------------------------------
+
+/** Remove a block between two members (the blocker's row). */
+export async function unblockPair(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const blockerId = str(formData, 'blocker_id')
+  const blockedId = str(formData, 'blocked_id')
+  if (!UUID_RE.test(blockerId) || !UUID_RE.test(blockedId)) throw new Error('Invalid block record')
+  const { admin } = ctx
+  const { data: rows, error } = await admin
+    .from('blocks')
+    .delete()
+    .eq('blocker_id', blockerId)
+    .eq('blocked_id', blockedId)
+    .select('id')
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'block_removed', 'block', blockedId, { blocker_id: blockerId, removed: (rows ?? []).length })
+  revalidatePath('/admin/blocks')
+}
+
+// ---------------------------------------------------------------------------
+// Content management (PRD M)
+// ---------------------------------------------------------------------------
+
+const CONTENT_KEYS = [
+  'home_register_cta',
+  'about_intro',
+  'about_cta',
+  'contact_intro',
+  'whatsapp_community',
+] as const
+
+export async function saveContentBlock(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const key = str(formData, 'key')
+  const title = str(formData, 'title')
+  const body = str(formData, 'body')
+  const isActive = str(formData, 'is_active') === 'true'
+  if (!CONTENT_KEYS.includes(key as (typeof CONTENT_KEYS)[number])) {
+    throw new Error('Unknown content block')
+  }
+  if (body.trim().length === 0) throw new Error('Body is required')
+  const { admin } = ctx
+  const { error } = await admin
+    .from('site_content')
+    .upsert(
+      { key, title, body: body.trim(), is_active: isActive, updated_by: ctx.userId },
+      { onConflict: 'key' }
+    )
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'content_update', 'site_content', key, { is_active: isActive, title })
+  revalidatePath('/admin/content')
+  revalidatePath('/about')
+  revalidatePath('/')
+}
+
+// ---------------------------------------------------------------------------
+// WhatsApp configuration (PRD N)
+// ---------------------------------------------------------------------------
+
+export async function updateWhatsAppConfig(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const communityLink = str(formData, 'community_link') || null
+  const supportLink = str(formData, 'support_link') || null
+  const supportNumber = str(formData, 'support_number').replace(/\D/g, '') || null
+  const isActive = str(formData, 'is_active') === 'true'
+  if (communityLink && !/^https:\/\/(chat\.whatsapp\.com|wa\.me)\/.+/.test(communityLink)) {
+    throw new Error('Community link must start with https://chat.whatsapp.com/ or https://wa.me/')
+  }
+  if (supportLink && !/^https:\/\/wa\.me\/\d+/.test(supportLink)) {
+    throw new Error('Support link must start with https://wa.me/<number>')
+  }
+  if (supportNumber && !/^\d{10,15}$/.test(supportNumber)) {
+    throw new Error('Support number must be 10-15 digits (country code included)')
+  }
+  const { admin } = ctx
+  const { error } = await admin
+    .from('whatsapp_config')
+    .update({
+      community_link: communityLink,
+      support_link: supportLink,
+      support_number: supportNumber,
+      is_active: isActive,
+      updated_by: ctx.userId,
+    })
+    .eq('id', 1)
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'whatsapp_config_update', 'whatsapp_config', '1', {
+    community_link: communityLink,
+    support_link: supportLink,
+    support_number: supportNumber,
+    is_active: isActive,
+  })
+  revalidatePath('/admin/whatsapp')
+  revalidatePath('/about')
+  revalidatePath('/')
+}
+
+// ---------------------------------------------------------------------------
+// Boost configuration (PRD K)
+// ---------------------------------------------------------------------------
+
+export async function updateBoostConfig(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const priceInr = Number(str(formData, 'price_inr'))
+  const durationDays = Number(str(formData, 'duration_days'))
+  const isActive = str(formData, 'is_active') === 'true'
+  if (!Number.isFinite(priceInr) || priceInr < 0) throw new Error('Invalid price')
+  if (!Number.isFinite(durationDays) || durationDays < 1 || durationDays > 30) {
+    throw new Error('Duration must be 1-30 days')
+  }
+  const { admin } = ctx
+  const { error } = await admin
+    .from('profile_boost_config')
+    .update({
+      price_inr: Math.round(priceInr),
+      duration_days: Math.round(durationDays),
+      is_active: isActive,
+      updated_by: ctx.userId,
+    })
+    .eq('id', 1)
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'boost_config_update', 'profile_boost_config', '1', {
+    price_inr: priceInr,
+    duration_days: durationDays,
+    is_active: isActive,
+  })
+  revalidatePath('/admin/boosts')
+}
+
+// ---------------------------------------------------------------------------
+// Family photo moderation (PRD F / Z)
+// ---------------------------------------------------------------------------
+
+/**
+ * Admin removes a member's family photo (DB row + storage object). The
+ * profile automatically falls out of the public directory on the very next
+ * read — is_profile_public() re-evaluates live and requires a family photo,
+ * so no separate "re-evaluate" step is needed. The member is notified.
+ */
+export async function removeFamilyPhoto(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const userId = str(formData, 'user_id')
+  if (!UUID_RE.test(userId)) throw new Error('Invalid member')
+  const { admin } = ctx
+  const { data: photo } = await admin
+    .from('profile_photos')
+    .select('id, storage_path')
+    .eq('profile_id', userId)
+    .eq('kind', 'family_photo')
+    .maybeSingle()
+  if (!photo) throw new Error('This member has no family photo')
+
+  const { error } = await admin.from('profile_photos').delete().eq('id', photo.id)
+  if (error) throw new Error(error.message)
+  await admin.storage.from('profile-photos').remove([photo.storage_path]).catch(() => undefined)
+
+  await admin
+    .rpc('push_notification', {
+      p_user_id: userId,
+      p_type: 'admin_message',
+      p_title: 'Family photo removed',
+      p_message:
+        'Our review team removed the family photo from your profile. It may now be hidden from other members until a new family photo is added. If you believe this is a mistake, contact support.',
+      p_metadata: {},
+      p_link: '/profile/edit',
+    })
+    .then(() => undefined, () => undefined)
+
+  await audit(ctx, 'family_photo_removed', 'profile', userId, { photo_id: photo.id })
+  revalidatePath('/admin/members')
+}
+
+// ---------------------------------------------------------------------------
+// Member lifecycle (PRD Y) — hide / reactivate / delete / grant boost
+// ---------------------------------------------------------------------------
+
+/**
+ * Hide or reactivate a profile. Hiding sets status='hidden' (the member keeps
+ * their data and package; the profile just leaves the directory).
+ * Reactivating sets status='active' — full publishability is still enforced
+ * live by is_profile_public() (photos, DOB, membership…), so an admin cannot
+ * accidentally publish an incomplete profile.
+ */
+export async function setProfileHidden(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = str(formData, 'user_id')
+  const hide = str(formData, 'hide') === 'true'
+  if (!UUID_RE.test(targetUserId)) throw new Error('Invalid member')
+  const { admin } = ctx
+  const { error } = await admin
+    .from('matrimony_profiles')
+    .update({ status: hide ? 'hidden' : 'active' })
+    .eq('user_id', targetUserId)
+  if (error) throw new Error(error.message)
+  await audit(ctx, hide ? 'profile_hidden' : 'profile_reactivated', 'profile', targetUserId)
+  revalidatePath('/admin/members')
+}
+
+/** Grant a 7-day boost directly (recovery/support tooling). */
+export async function adminGrantBoost(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = await resolveMemberId(ctx.admin, str(formData, 'user_id'))
+  const { admin } = ctx
+  const { data: existing } = await admin
+    .from('profile_boosts')
+    .select('id, expires_at')
+    .eq('user_id', targetUserId)
+    .eq('status', 'active')
+    .gt('expires_at', new Date().toISOString())
+    .limit(1)
+    .maybeSingle()
+  if (existing) throw new Error('This member already has an active boost')
+
+  const { data: row, error } = await admin
+    .from('profile_boosts')
+    .insert({ user_id: targetUserId, status: 'active', created_via: 'admin' })
+    .select('id')
+    .single()
+  if (error) throw new Error(error.message)
+
+  await admin
+    .rpc('push_notification', {
+      p_user_id: targetUserId,
+      p_type: 'admin_message',
+      p_title: 'Profile boost activated',
+      p_message: 'Our team has activated a 7-day Profile Boost for your profile — you appear first in search while it lasts.',
+      p_metadata: {},
+      p_link: '/profile',
+    })
+    .then(() => undefined, () => undefined)
+
+  await audit(ctx, 'boost_granted', 'profile', targetUserId, { boost_id: row?.id ?? null })
+  revalidatePath('/admin/members')
+}
+
+/**
+ * Admin deletes a member's account entirely (service role): storage wiped,
+ * auth user deleted, every referencing row cascaded. Destructive and
+ * audit-logged. Mirrors the member self-delete in src/app/profile/actions.ts.
+ */
+export async function adminDeleteMember(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const raw = str(formData, 'user_id')
+  const targetUserId = UUID_RE.test(raw)
+    ? raw
+    : await resolveMemberId(ctx.admin, raw)
+  if (targetUserId === ctx.userId) throw new Error('You cannot delete your own admin account here')
+  const { admin } = ctx
+
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('id, full_name, email')
+    .eq('id', targetUserId)
+    .maybeSingle()
+  if (!profile) throw new Error('Member not found')
+
+  // Wipe storage first (best effort), then delete the auth user — every DB
+  // row cascades from the profile id. Same logic as member self-delete.
+  const { wipeMemberFiles } = await import('@/app/profile/actions')
+  await wipeMemberFiles(admin, targetUserId)
+
+  const { error: delError } = await admin.auth.admin.deleteUser(targetUserId)
+  if (delError) throw new Error(delError.message)
+
+  await audit(ctx, 'member_deleted', 'profile', targetUserId, {
+    email: profile.email,
+    name: profile.full_name,
+    reason: str(formData, 'reason'),
+  })
+  revalidatePath('/admin/members')
+  revalidatePath('/admin')
+}

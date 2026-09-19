@@ -47,12 +47,20 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [advRes, sub] = await Promise.all([
+  const [advRes, sub, subsRes] = await Promise.all([
     supabase.rpc('has_benefit', { p_key: 'advanced_search' }),
     hasActiveSubscription(supabase, user.id),
+    // Community values come from the database (seeded: Mali + sub-communities).
+    supabase
+      .from('sub_communities')
+      .select('name')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true }),
   ])
   const advancedSearch = advRes.data === true
   const isPaid = sub
+  const dbSubCommunities = ((subsRes.data ?? []) as { name: string }[]).map((r) => r.name)
+  const subOptions = dbSubCommunities.length > 0 ? dbSubCommunities : [...subCommunityOptions]
 
   const lookingFor =
     searchParams?.lookingFor === 'groom' ? 'male' : searchParams?.lookingFor === 'bride' ? 'female' : null
@@ -122,7 +130,9 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
           method="get"
           className="mx-auto mt-8 max-w-5xl rounded-[28px] bg-maroon-deep px-6 py-6 shadow-2xl shadow-maroon/30 sm:px-8"
         >
-          <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-[1fr_0.8fr_0.8fr_1fr_1fr_auto] lg:items-end">
+          {/* Basic search: bride/groom, age, location — available to everyone.
+              The sub-community filter is an ADVANCED filter (server-gated). */}
+          <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-[1fr_0.8fr_0.8fr_1fr_auto] lg:items-end">
             <Field label="Looking for">
               <div className="flex gap-2">
                 {(['bride', 'groom'] as const).map((v) => (
@@ -155,13 +165,6 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
                 icon={<MapPin className="h-4 w-4 text-maroon/60" />}
               />
             </Field>
-            <Field label="Sub-community">
-              <Select
-                name="subCommunity"
-                options={[...subCommunityOptions]}
-                defaultValue={searchParams?.subCommunity}
-              />
-            </Field>
             <button
               type="submit"
               className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-gold-400 px-6 py-2.5 text-sm font-bold text-maroon-deep shadow-lg hover:bg-gold-300 sm:w-auto"
@@ -187,6 +190,14 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
             </summary>
             {advancedSearch ? (
               <div className="mt-4 grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Field label="Sub-community">
+                  <select name="subCommunity" defaultValue={searchParams?.subCommunity ?? ''} className="w-full appearance-none rounded-full border border-white bg-white py-2.5 pl-4 pr-9 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400">
+                    <option value="">Any</option>
+                    {subOptions.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                </Field>
                 <Field label="Education">
                   <select name="education" defaultValue={searchParams?.education ?? ''} className="w-full appearance-none rounded-full border border-white bg-white py-2.5 pl-4 pr-9 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400">
                     <option value="">Any</option>
@@ -240,8 +251,8 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
               </div>
             ) : (
               <p className="mt-3 max-w-2xl text-sm text-white/70">
-                Filter by education, occupation, marital status, diet, income, height and native
-                place.{' '}
+                Filter by sub-community, education, occupation, marital status, diet, income,
+                height and native place.{' '}
                 <Link href="/packages" className="font-bold text-gold-300 underline underline-offset-2">
                   Upgrade to Premium or VIP
                 </Link>{' '}
