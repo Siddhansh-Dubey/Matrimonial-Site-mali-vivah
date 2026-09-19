@@ -9,7 +9,15 @@
  * Client components/users can never reach these — they are server-only.
  */
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { audit, requireAdminAction, type AdminContext } from '@/lib/admin/server'
+import { VISIBILITY_REASON_LABELS, friendlyAdminError } from '@/lib/admin/members'
+import {
+  aboutSchema,
+  educationSchema,
+  familySchema,
+  personalSchema,
+} from '@/lib/profile/profile-schema'
 import type { Json } from '@/lib/supabase/database.types'
 
 function str(fd: FormData, key: string): string {
@@ -20,6 +28,83 @@ function str(fd: FormData, key: string): string {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 type AdminClient = AdminContext['admin']
+
+// ---------------------------------------------------------------------------
+// Member-management plumbing (Step 7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a member-management form wants to land afterwards. Only paths inside
+ * the Members module are honoured (no open redirects); anything else means
+ * "behave like before" (throw on error, plain revalidate on success).
+ */
+function safeReturnTo(fd: FormData): string | null {
+  const v = str(fd, 'return_to')
+  if (!v.startsWith('/admin/members')) return null
+  if (/[\s]/.test(v) || v.startsWith('//') || v.includes('\\')) return null
+  return v.split('#')[0]
+}
+
+function withNotice(path: string, key: 'ok' | 'error', value: string): string {
+  const [base, query = ''] = path.split('?')
+  const params = new URLSearchParams(query)
+  params.delete('ok')
+  params.delete('error')
+  params.set(key, value)
+  return `${base}?${params.toString()}`
+}
+
+/**
+ * Runs a member-management action. With `return_to` in the form the admin is
+ * sent back with a readable `?ok=` / `?error=` notice (a thrown error would
+ * otherwise surface as a bare Next.js error screen — unusable on a phone).
+ * Without it the historical behaviour is kept for the other admin pages that
+ * reuse these actions (Featured, Payments, Boosts).
+ */
+async function memberAction(
+  formData: FormData,
+  targetUserId: string | null,
+  fn: () => Promise<string>
+): Promise<void> {
+  const returnTo = safeReturnTo(formData)
+  let notice: string
+  try {
+    notice = await fn()
+  } catch (err) {
+    if (!returnTo) throw err
+    redirect(withNotice(returnTo, 'error', friendlyAdminError(err instanceof Error ? err.message : String(err))))
+  }
+  revalidatePath('/admin/members')
+  revalidatePath('/admin')
+  if (targetUserId) {
+    revalidatePath(`/admin/members/${targetUserId}`)
+    revalidatePath(`/admin/members/${targetUserId}/edit`)
+  }
+  if (returnTo) redirect(withNotice(returnTo, 'ok', notice))
+}
+
+/**
+ * Activity event for admin actions implemented in TypeScript (the SQL RPCs
+ * log their own). Members can read their own activity stream, so metadata
+ * carries state facts only — never reasons, notes or admin ids.
+ */
+async function logMemberActivity(
+  admin: AdminClient,
+  userId: string,
+  event: string,
+  metadata: Record<string, Json | undefined> = {}
+): Promise<void> {
+  await admin
+    .rpc('log_activity', { p_user_id: userId, p_event: event, p_metadata: metadata as Json })
+    .then(() => undefined, () => undefined)
+}
+
+function requireUuid(value: string, what = 'member'): string {
+  if (!UUID_RE.test(value)) throw new Error(`Invalid ${what}`)
+  return value
+}
+
+type RpcResult = Record<string, Json | undefined>
 
 /**
  * Resolve whatever the admin pasted from a member row to a real profile id:
@@ -63,68 +148,114 @@ async function resolveMemberId(admin: AdminClient, raw: string): Promise<string>
 // Members & profiles
 // ---------------------------------------------------------------------------
 
-/** Suspend or unsuspend a member's profile (blocks discovery + contact). */
+/**
+ * Suspend / unsuspend a member's profile.
+ *
+ * Authoritative in the database (admin_set_profile_suspended): suspension
+ * flips status to 'suspended' (RLS + is_profile_public() both drop the row
+ * from search, recommendations, Daily 5, featured and interest), and
+ * UNSUSPEND is state-aware — live membership → active (via the publish
+ * gate), lapsed → expired, never paid → hidden (APPROVED_FREE), never
+ * published → the draft/pending status it had. It never creates membership.
+ */
 export async function setProfileSuspended(formData: FormData) {
   const ctx = await requireAdminAction()
-  const targetUserId = str(formData, 'user_id')
+  const targetUserId = requireUuid(str(formData, 'user_id'))
   const suspend = str(formData, 'suspend') === 'true'
-  const { admin } = ctx
-  const status = suspend ? 'suspended' : 'active'
-  const { error } = await admin
-    .from('matrimony_profiles')
-    .update({ status })
-    .eq('user_id', targetUserId)
-  if (error) throw new Error(error.message)
-  await audit(ctx, suspend ? 'profile_suspend' : 'profile_unsuspend', 'profile', targetUserId)
-  revalidatePath('/admin/members')
-  revalidatePath('/admin')
+  await memberAction(formData, targetUserId, async () => {
+    const { error } = await ctx.admin.rpc('admin_set_profile_suspended', {
+      p_user_id: targetUserId,
+      p_suspend: suspend,
+      p_admin_id: ctx.userId,
+      p_reason: str(formData, 'reason') || null,
+    })
+    if (error) throw new Error(error.message)
+    return suspend ? 'suspended' : 'unsuspended'
+  })
 }
 
-/** Toggle the verified badge directly (usually goes through the queue). */
+/**
+ * Toggle the verified badge directly (usually goes through the queue).
+ * Verification is ONLY verification: it never changes membership, status or
+ * visibility (verified ≠ paid ≠ public).
+ */
 export async function setProfileVerified(formData: FormData) {
   const ctx = await requireAdminAction()
-  const targetUserId = str(formData, 'user_id')
+  const targetUserId = requireUuid(str(formData, 'user_id'))
   const verify = str(formData, 'verify') === 'true'
   const { admin } = ctx
-  const { error } = await admin
-    .from('matrimony_profiles')
-    .update({ verified_at: verify ? new Date().toISOString() : null })
-    .eq('user_id', targetUserId)
-  if (error) throw new Error(error.message)
-  await admin.rpc('push_notification', {
-    p_user_id: targetUserId,
-    p_type: verify ? 'profile_verified' : 'admin_message',
-    p_title: verify ? 'Profile verified' : 'Verification removed',
-    p_message: verify
-      ? 'Your verified badge is live. Thank you for helping keep Mali Vivah safe.'
-      : 'An admin removed the verified badge from your profile. Reply to this message if you believe this is a mistake.',
-    p_metadata: {},
-    p_link: '/profile',
-  }).then(() => undefined, () => undefined)
-  await audit(ctx, verify ? 'verify_badge_grant' : 'verify_badge_revoke', 'profile', targetUserId)
-  revalidatePath('/admin/members')
+  await memberAction(formData, targetUserId, async () => {
+    const { error } = await admin
+      .from('matrimony_profiles')
+      .update({ verified_at: verify ? new Date().toISOString() : null })
+      .eq('user_id', targetUserId)
+    if (error) throw new Error(error.message)
+    await admin.rpc('push_notification', {
+      p_user_id: targetUserId,
+      p_type: verify ? 'profile_verified' : 'admin_message',
+      p_title: verify ? 'Profile verified' : 'Verification removed',
+      p_message: verify
+        ? 'Your verified badge is live. Thank you for helping keep Mali Vivah safe.'
+        : 'An admin removed the verified badge from your profile. Reply to this message if you believe this is a mistake.',
+      p_metadata: {},
+      p_link: '/profile',
+    }).then(() => undefined, () => undefined)
+    await audit(ctx, verify ? 'verify_badge_grant' : 'verify_badge_revoke', 'profile', targetUserId)
+    await logMemberActivity(admin, targetUserId, verify ? 'admin_member_verified' : 'admin_member_unverified', {
+      source: 'admin_panel',
+    })
+    return verify ? 'verified' : 'unverified'
+  })
 }
 
-/** Feature (homepage) or un-feature a profile. */
+/**
+ * Feature (homepage) or un-feature a profile.
+ * Only a profile that is publicly visible RIGHT NOW (is_profile_public) can
+ * be newly featured; the featured_profiles primary key prevents duplicates
+ * and get_featured_profiles() re-checks publicity on every homepage render,
+ * so a later suspension / hold / expiry never leaves it publicly featured.
+ * Re-saving the position of an already featured profile is always allowed.
+ */
 export async function setFeatured(formData: FormData) {
   const ctx = await requireAdminAction()
-  const targetUserId = str(formData, 'user_id')
+  const targetUserId = requireUuid(str(formData, 'user_id'))
   const feature = str(formData, 'feature') === 'true'
   const position = Number(str(formData, 'position') || '0')
   const { admin } = ctx
-  if (feature) {
-    const { error } = await admin
+  await memberAction(formData, targetUserId, async () => {
+    if (feature) {
+      const { data: existing } = await admin
+        .from('featured_profiles')
+        .select('profile_id')
+        .eq('profile_id', targetUserId)
+        .maybeSingle()
+      if (!existing) {
+        const { data: isPublic } = await admin.rpc('is_profile_public', { p_user_id: targetUserId })
+        if (isPublic !== true) {
+          const { data: vis } = await admin.rpc('profile_visibility_reason', { p_user_id: targetUserId })
+          const reason = (vis as { reason?: string } | null)?.reason
+          const why = reason ? VISIBILITY_REASON_LABELS[reason] ?? reason : null
+          throw new Error(`Only publicly visible profiles can be featured${why ? ` — this one is: ${why}` : ''}.`)
+        }
+      }
+      const { error } = await admin
+        .from('featured_profiles')
+        .upsert({ profile_id: targetUserId, position, created_by: ctx.userId })
+      if (error) throw new Error(error.message)
+      await audit(ctx, 'feature_profile', 'profile', targetUserId, { position })
+      if (!existing) await logMemberActivity(admin, targetUserId, 'admin_member_featured', { position })
+      return 'featured'
+    }
+    const { data: removed } = await admin
       .from('featured_profiles')
-      .upsert({ profile_id: targetUserId, position, created_by: ctx.userId })
-    if (error) throw new Error(error.message)
-  } else {
-    await admin.from('featured_profiles').delete().eq('profile_id', targetUserId)
-  }
-  await audit(ctx, feature ? 'feature_profile' : 'unfeature_profile', 'profile', targetUserId, {
-    position,
+      .delete()
+      .eq('profile_id', targetUserId)
+      .select('profile_id')
+    await audit(ctx, 'unfeature_profile', 'profile', targetUserId, { position })
+    if ((removed ?? []).length > 0) await logMemberActivity(admin, targetUserId, 'admin_member_unfeatured')
+    revalidatePath('/admin/featured')
+    return 'unfeatured'
   })
-  revalidatePath('/admin/members')
-  revalidatePath('/admin/featured')
 }
 
 // ---------------------------------------------------------------------------
@@ -234,17 +365,27 @@ export async function manualActivate(formData: FormData) {
   const ctx = await requireAdminAction()
   const packageId = Number(str(formData, 'package_id'))
   const note = str(formData, 'note')
-  if (!Number.isFinite(packageId)) throw new Error('Choose a package')
+  if (!Number.isFinite(packageId) || packageId <= 0) throw new Error('Choose a package')
   const targetUserId = await resolveMemberId(ctx.admin, str(formData, 'user_id'))
   const { admin } = ctx
-  const { data, error } = await admin.rpc('activate_membership', {
-    p_user_id: targetUserId,
-    p_package_id: packageId,
+  await memberAction(formData, targetUserId, async () => {
+    // The ONLY activation path — same RPC the Razorpay verify/webhook use.
+    const { data, error } = await admin.rpc('activate_membership', {
+      p_user_id: targetUserId,
+      p_package_id: packageId,
+    })
+    if (error) throw new Error(error.message)
+    const r = (data ?? {}) as RpcResult
+    await audit(ctx, 'manual_activation', 'user', targetUserId, { package_id: packageId, note, result: data })
+    await logMemberActivity(admin, targetUserId, 'admin_manual_membership_activation', {
+      package_id: packageId,
+      package_slug: (r.package_slug as string | undefined) ?? null,
+      subscription_id: (r.subscription_id as number | undefined) ?? null,
+      profile_status: (r.profile_status as string | undefined) ?? null,
+    })
+    revalidatePath('/admin/payments')
+    return 'activated'
   })
-  if (error) throw new Error(error.message)
-  await audit(ctx, 'manual_activation', 'user', targetUserId, { package_id: packageId, note, result: data })
-  revalidatePath('/admin/payments')
-  revalidatePath('/admin/members')
 }
 
 /** Mark a payment refunded (revokes the subscription). */
@@ -683,29 +824,357 @@ export async function removeFamilyPhoto(formData: FormData) {
 }
 
 // ---------------------------------------------------------------------------
-// Member lifecycle (PRD Y) — hide / reactivate / delete / grant boost
+// Member lifecycle (PRD Y / Step 7) — hide / reactivate / approve / reject /
+// edit / photos / boost / delete
 // ---------------------------------------------------------------------------
 
 /**
- * Hide or reactivate a profile. Hiding sets status='hidden' (the member keeps
- * their data and package; the profile just leaves the directory).
- * Reactivating sets status='active' — full publishability is still enforced
- * live by is_profile_public() (photos, DOB, membership…), so an admin cannot
- * accidentally publish an incomplete profile.
+ * Admin HOLD on / off (admin_set_profile_hidden). Distinct from suspension,
+ * expiry, the member's privacy settings and drafts: the profile's status,
+ * membership, subscriptions and payments stay exactly as they are — only
+ * is_profile_public() turns false until the hold is lifted.
  */
 export async function setProfileHidden(formData: FormData) {
   const ctx = await requireAdminAction()
-  const targetUserId = str(formData, 'user_id')
+  const targetUserId = requireUuid(str(formData, 'user_id'))
   const hide = str(formData, 'hide') === 'true'
-  if (!UUID_RE.test(targetUserId)) throw new Error('Invalid member')
+  await memberAction(formData, targetUserId, async () => {
+    const { error } = await ctx.admin.rpc('admin_set_profile_hidden', {
+      p_user_id: targetUserId,
+      p_hide: hide,
+      p_admin_id: ctx.userId,
+      p_reason: str(formData, 'reason') || null,
+    })
+    if (error) throw new Error(error.message)
+    return hide ? 'hidden' : 'unhidden'
+  })
+}
+
+/**
+ * State-aware Reactivate (admin_reactivate_profile): lifts a hold and/or a
+ * suspension and restores the status the member's REAL membership implies.
+ * Expired stays expired without a renewal, drafts stay drafts — it never
+ * creates a subscription or bypasses the publish gate.
+ */
+export async function reactivateMember(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = requireUuid(str(formData, 'user_id'))
+  await memberAction(formData, targetUserId, async () => {
+    const { data, error } = await ctx.admin.rpc('admin_reactivate_profile', {
+      p_user_id: targetUserId,
+      p_admin_id: ctx.userId,
+    })
+    if (error) throw new Error(error.message)
+    const r = (data ?? {}) as RpcResult
+    if (r.changed !== true) {
+      const note = typeof r.note === 'string' ? friendlyAdminError(r.note) : ''
+      throw new Error(note || 'Nothing to reactivate — see the visibility panel for what this member still needs.')
+    }
+    return 'reactivated'
+  })
+}
+
+/** Approve within the existing status model (admin_approve_profile). */
+export async function approveMemberProfile(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = requireUuid(str(formData, 'user_id'))
+  await memberAction(formData, targetUserId, async () => {
+    const { error } = await ctx.admin.rpc('admin_approve_profile', {
+      p_user_id: targetUserId,
+      p_admin_id: ctx.userId,
+    })
+    if (error) throw new Error(error.message)
+    return 'approved'
+  })
+}
+
+/** Send a profile back for changes (admin_reject_profile) — note is member-facing. */
+export async function rejectMemberProfile(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = requireUuid(str(formData, 'user_id'))
+  await memberAction(formData, targetUserId, async () => {
+    const { error } = await ctx.admin.rpc('admin_reject_profile', {
+      p_user_id: targetUserId,
+      p_admin_id: ctx.userId,
+      p_note: str(formData, 'note') || null,
+    })
+    if (error) throw new Error(error.message)
+    return 'rejected'
+  })
+}
+
+/* --------------------------- profile editing ---------------------------- */
+
+const OPTIONAL_TEXT_FIELDS = [
+  'mother_tongue',
+  'gotra',
+  'city',
+  'state',
+  'country',
+  'native_place',
+  'education',
+  'education_details',
+  'occupation',
+  'company',
+  'business_name',
+  'annual_income',
+  'about_me',
+  'father_occupation',
+  'mother_occupation',
+  'siblings',
+  'family_location',
+  'family_details',
+] as const
+
+const ENUM_FIELDS = ['profile_for', 'gender', 'marital_status', 'diet', 'smoking', 'drinking', 'family_type'] as const
+
+const PREF_TEXT_FIELDS = [
+  'preferred_education',
+  'preferred_occupation',
+  'preferred_income',
+  'preferred_native_place',
+  'note',
+] as const
+const PREF_ENUM_FIELDS = ['preferred_gender', 'preferred_diet', 'preferred_marital_status', 'preferred_family_type'] as const
+const PREF_NUMBER_FIELDS = ['min_age', 'max_age', 'min_height_cm', 'max_height_cm'] as const
+const PREF_LIST_FIELDS = ['preferred_cities', 'preferred_sub_communities'] as const
+
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+
+function splitList(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(/[,\n]/)
+        .map((v) => v.trim())
+        .filter(Boolean)
+    )
+  ).slice(0, 25)
+}
+
+function firstIssue(issues: { path: (string | number)[]; message: string }[]): string {
+  const i = issues[0]
+  const field = String(i?.path?.[0] ?? 'value')
+    .replace(/([A-Z])/g, ' $1')
+    .toLowerCase()
+  const msg = i?.message ?? 'invalid'
+  return `${field}: ${msg === 'required' ? 'is required' : msg}`
+}
+
+/**
+ * Admin edit of a member's profile + partner preferences.
+ *
+ * The form carries the same fields the member wizard writes (community
+ * hierarchy, business_name separate from company, lifestyle enums, family
+ * block, preferences). Only fields that actually CHANGED are sent to
+ * admin_update_member_profile(), which enforces the column allow-list and
+ * lets the existing triggers validate the community hierarchy. Status,
+ * verification, privacy settings and identity fields are deliberately not
+ * part of this form — they have their own actions.
+ */
+export async function updateMemberProfile(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = requireUuid(str(formData, 'user_id'))
   const { admin } = ctx
-  const { error } = await admin
-    .from('matrimony_profiles')
-    .update({ status: hide ? 'hidden' : 'active' })
-    .eq('user_id', targetUserId)
-  if (error) throw new Error(error.message)
-  await audit(ctx, hide ? 'profile_hidden' : 'profile_reactivated', 'profile', targetUserId)
-  revalidatePath('/admin/members')
+  await memberAction(formData, targetUserId, async () => {
+    const [{ data: person }, { data: current }, { data: prefs }] = await Promise.all([
+      admin.from('profiles').select('full_name').eq('id', targetUserId).maybeSingle(),
+      admin.from('matrimony_profiles').select('*').eq('user_id', targetUserId).maybeSingle(),
+      admin.from('partner_preferences').select('*').eq('profile_id', targetUserId).maybeSingle(),
+    ])
+    if (!person || !current) throw new Error('Member not found')
+    const cur = current as unknown as Record<string, unknown>
+    const pp = (prefs ?? {}) as unknown as Record<string, unknown>
+
+    const profilePatch: Record<string, Json> = {}
+    const prefPatch: Record<string, Json> = {}
+    const setIf = (target: Record<string, Json>, key: string, next: Json, prev: unknown) => {
+      if (!sameJson(next, prev)) target[key] = next
+    }
+
+    // --- account display name
+    const fullName = str(formData, 'full_name')
+    if (fullName && fullName !== person.full_name) {
+      if (fullName.length < 2 || fullName.length > 80) throw new Error('Name must be between 2 and 80 characters')
+      profilePatch.full_name = fullName
+    }
+
+    // --- shared limits with the member wizard (zod schemas are the source)
+    const personal = personalSchema
+      .pick({ heightCm: true, gotra: true, country: true, nativePlace: true })
+      .partial()
+      .safeParse({
+        heightCm: str(formData, 'height_cm') || undefined,
+        gotra: str(formData, 'gotra') || undefined,
+        country: str(formData, 'country') || undefined,
+        nativePlace: str(formData, 'native_place') || undefined,
+      })
+    if (!personal.success) throw new Error(firstIssue(personal.error.issues))
+    const education = educationSchema
+      .pick({ company: true, businessName: true })
+      .partial()
+      .safeParse({
+        company: str(formData, 'company') || undefined,
+        businessName: str(formData, 'business_name') || undefined,
+      })
+    if (!education.success) throw new Error(firstIssue(education.error.issues))
+    const about = aboutSchema.pick({ aboutMe: true }).partial().safeParse({ aboutMe: str(formData, 'about_me') || undefined })
+    if (!about.success) throw new Error(firstIssue(about.error.issues))
+    const family = familySchema
+      .pick({ fatherOccupation: true, motherOccupation: true, siblings: true, familyLocation: true, familyDetails: true })
+      .partial()
+      .safeParse({
+        fatherOccupation: str(formData, 'father_occupation') || undefined,
+        motherOccupation: str(formData, 'mother_occupation') || undefined,
+        siblings: str(formData, 'siblings') || undefined,
+        familyLocation: str(formData, 'family_location') || undefined,
+        familyDetails: str(formData, 'family_details') || undefined,
+      })
+    if (!family.success) throw new Error(firstIssue(family.error.issues))
+
+    // --- plain text columns ('' → null)
+    for (const key of OPTIONAL_TEXT_FIELDS) {
+      if (!formData.has(key)) continue
+      setIf(profilePatch, key, str(formData, key) || null, cur[key] ?? null)
+    }
+    // --- enums (validated by the database enum types)
+    for (const key of ENUM_FIELDS) {
+      if (!formData.has(key)) continue
+      const v = str(formData, key)
+      if (!v) continue
+      setIf(profilePatch, key, v, cur[key] ?? null)
+    }
+    // --- date of birth / height
+    if (formData.has('date_of_birth')) {
+      const dob = str(formData, 'date_of_birth')
+      if (dob && !/^\d{4}-\d{2}-\d{2}$/.test(dob)) throw new Error('Date of birth must be YYYY-MM-DD')
+      setIf(profilePatch, 'date_of_birth', dob || null, cur.date_of_birth ? String(cur.date_of_birth).slice(0, 10) : null)
+    }
+    if (formData.has('height_cm')) {
+      const h = str(formData, 'height_cm')
+      setIf(profilePatch, 'height_cm', h ? Number(h) : null, cur.height_cm ?? null)
+    }
+    // --- hobbies (checkbox group; an explicit marker distinguishes "none" from "not on form")
+    if (formData.has('hobbies_present')) {
+      const hobbies = formData
+        .getAll('hobbies')
+        .filter((v): v is string => typeof v === 'string')
+        .map((v) => v.trim())
+        .filter(Boolean)
+        .slice(0, 20)
+      setIf(profilePatch, 'hobbies', hobbies, cur.hobbies ?? [])
+    }
+    // --- community hierarchy: the sub-community row is authoritative; the
+    //     community id is derived from it so the pair is always consistent.
+    // (a disabled selector is not submitted; an untouched selector — same
+    //  value as when the form was rendered — is skipped so a legacy link that
+    //  could not be resolved to an active row is never cleared by accident)
+    if (formData.has('sub_community_id') && str(formData, 'sub_community_id') !== str(formData, 'sub_community_initial')) {
+      const subId = str(formData, 'sub_community_id')
+      if (subId) {
+        requireUuid(subId, 'sub-community')
+        const { data: sub } = await admin
+          .from('sub_communities')
+          .select('id, community_id')
+          .eq('id', subId)
+          .maybeSingle()
+        if (!sub) throw new Error('COMMUNITY_INVALID: that sub-community does not exist')
+        setIf(profilePatch, 'sub_community_id', sub.id, cur.sub_community_id ?? null)
+        setIf(profilePatch, 'community_id', sub.community_id, cur.community_id ?? null)
+      } else {
+        setIf(profilePatch, 'sub_community_id', null, cur.sub_community_id ?? null)
+        setIf(profilePatch, 'community_id', null, cur.community_id ?? null)
+      }
+    }
+
+    // --- partner preferences
+    for (const key of PREF_TEXT_FIELDS) {
+      if (!formData.has(key)) continue
+      const v = str(formData, key)
+      if (v.length > (key === 'note' ? 500 : 120)) throw new Error(`${key.replace(/_/g, ' ')} is too long`)
+      setIf(prefPatch, key, v || null, pp[key] ?? null)
+    }
+    for (const key of PREF_ENUM_FIELDS) {
+      if (!formData.has(key)) continue
+      const v = str(formData, key)
+      if (key === 'preferred_gender' && !v) continue
+      setIf(prefPatch, key, v || null, pp[key] ?? null)
+    }
+    for (const key of PREF_NUMBER_FIELDS) {
+      if (!formData.has(key)) continue
+      const v = str(formData, key)
+      const n = v ? Number(v) : null
+      if (n !== null && !Number.isFinite(n)) throw new Error(`${key.replace(/_/g, ' ')} must be a number`)
+      if (n !== null && key.endsWith('_age') && (n < 18 || n > 60)) throw new Error('Age must be between 18 and 60')
+      if (n !== null && key.endsWith('_height_cm') && (n < 120 || n > 220)) throw new Error('Height must be 120–220 cm')
+      if (n === null && key.endsWith('_age')) continue
+      setIf(prefPatch, key, n, pp[key] ?? null)
+    }
+    for (const key of PREF_LIST_FIELDS) {
+      if (!formData.has(key)) continue
+      setIf(prefPatch, key, splitList(str(formData, key)), pp[key] ?? [])
+    }
+
+    if (Object.keys(profilePatch).length === 0 && Object.keys(prefPatch).length === 0) return 'edit_noop'
+
+    const { data, error } = await admin.rpc('admin_update_member_profile', {
+      p_user_id: targetUserId,
+      p_admin_id: ctx.userId,
+      p_profile: profilePatch,
+      p_prefs: prefPatch,
+    })
+    if (error) throw new Error(error.message)
+    const r = (data ?? {}) as RpcResult
+    return r.changed === false ? 'edit_noop' : 'edited'
+  })
+}
+
+/**
+ * Admin removes ONE photo (profile or family) — DB row + storage object.
+ * Publicity re-evaluates live: is_profile_public() needs both a profile
+ * photo and a family photo, so the profile may leave the directory until the
+ * member uploads a replacement. The member is notified.
+ */
+export async function adminRemovePhoto(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = requireUuid(str(formData, 'user_id'))
+  const photoId = Number(str(formData, 'photo_id'))
+  if (!Number.isFinite(photoId)) throw new Error('Invalid photo')
+  const { admin } = ctx
+  await memberAction(formData, targetUserId, async () => {
+    const { data: photo } = await admin
+      .from('profile_photos')
+      .select('id, storage_path, kind, is_primary')
+      .eq('id', photoId)
+      .eq('profile_id', targetUserId)
+      .maybeSingle()
+    if (!photo) throw new Error('Photo not found for this member')
+
+    const { error } = await admin.from('profile_photos').delete().eq('id', photo.id)
+    if (error) throw new Error(error.message)
+    await admin.storage.from('profile-photos').remove([photo.storage_path]).catch(() => undefined)
+
+    const family = photo.kind === 'family_photo'
+    await admin
+      .rpc('push_notification', {
+        p_user_id: targetUserId,
+        p_type: 'admin_message',
+        p_title: family ? 'Family photo removed' : 'Profile photo removed',
+        p_message: family
+          ? 'Our review team removed the family photo from your profile. It may now be hidden from other members until a new family photo is added. If you believe this is a mistake, contact support.'
+          : 'Our review team removed a photo from your profile. Please upload a clear, recent photo of yourself. If you believe this is a mistake, contact support.',
+        p_metadata: {},
+        p_link: '/profile/edit',
+      })
+      .then(() => undefined, () => undefined)
+
+    await audit(ctx, family ? 'family_photo_removed' : 'profile_photo_removed', 'profile', targetUserId, {
+      photo_id: photo.id,
+      kind: photo.kind,
+    })
+    await logMemberActivity(admin, targetUserId, 'admin_member_photo_removed', { kind: photo.kind })
+    return 'photo_removed'
+  })
 }
 
 /**
@@ -721,71 +1190,91 @@ export async function adminGrantBoost(formData: FormData) {
   const ctx = await requireAdminAction()
   const targetUserId = await resolveMemberId(ctx.admin, str(formData, 'user_id'))
   const { admin } = ctx
-  const { data, error } = await admin.rpc('admin_grant_boost', {
-    p_user_id: targetUserId,
-    p_granted_by: ctx.userId,
-  })
-  if (error) {
-    if (error.message.includes('BOOST_ALREADY_ACTIVE')) {
-      throw new Error('This member already has an active boost')
+  await memberAction(formData, targetUserId, async () => {
+    const { data, error } = await admin.rpc('admin_grant_boost', {
+      p_user_id: targetUserId,
+      p_granted_by: ctx.userId,
+    })
+    if (error) {
+      if (error.message.includes('BOOST_ALREADY_ACTIVE')) {
+        throw new Error('This member already has an active boost')
+      }
+      if (error.message.includes('BOOST_CONFIG_MISSING') || error.message.includes('BOOST_CONFIG_INVALID')) {
+        throw new Error('Boost duration is not configured — set it under Admin → Boosts first')
+      }
+      throw new Error(error.message)
     }
-    if (error.message.includes('BOOST_CONFIG_MISSING') || error.message.includes('BOOST_CONFIG_INVALID')) {
-      throw new Error('Boost duration is not configured — set it under Admin → Boosts first')
-    }
-    throw new Error(error.message)
-  }
 
-  const result = (data ?? {}) as {
-    boost_id?: number
-    entitlement_id?: number
-    duration_days?: number
-    expires_at?: string
-  }
-  await audit(ctx, 'boost_granted', 'profile', targetUserId, {
-    boost_id: result.boost_id ?? null,
-    entitlement_id: result.entitlement_id ?? null,
-    duration_days: result.duration_days ?? null,
-    expires_at: result.expires_at ?? null,
-    source: 'admin',
+    const result = (data ?? {}) as {
+      boost_id?: number
+      entitlement_id?: number
+      duration_days?: number
+      expires_at?: string
+    }
+    await audit(ctx, 'boost_granted', 'profile', targetUserId, {
+      boost_id: result.boost_id ?? null,
+      entitlement_id: result.entitlement_id ?? null,
+      duration_days: result.duration_days ?? null,
+      expires_at: result.expires_at ?? null,
+      source: 'admin',
+    })
+    revalidatePath('/admin/boosts')
+    return 'boosted'
   })
-  revalidatePath('/admin/members')
-  revalidatePath('/admin/boosts')
 }
 
 /**
- * Admin deletes a member's account entirely (service role): storage wiped,
- * auth user deleted, every referencing row cascaded. Destructive and
- * audit-logged. Mirrors the member self-delete in src/app/profile/actions.ts.
+ * Admin deletes a member's account entirely — deliberately, server-side only:
+ *   1. admin_prepare_member_deletion() enforces the guards (never your own
+ *      account, never another admin, the member's exact email must be typed
+ *      as confirmation) and records the audit row + activity events while
+ *      the user id still resolves;
+ *   2. storage is wiped with the SAME helper the member self-delete uses;
+ *   3. the auth user is deleted — every table cascades from the profile id
+ *      (subscriptions, payments, interests, messages, photos, moments,
+ *      notifications, boosts, verification…); audit / activity references
+ *      are SET NULL so the record of the deletion survives.
  */
 export async function adminDeleteMember(formData: FormData) {
   const ctx = await requireAdminAction()
   const raw = str(formData, 'user_id')
-  const targetUserId = UUID_RE.test(raw)
-    ? raw
-    : await resolveMemberId(ctx.admin, raw)
-  if (targetUserId === ctx.userId) throw new Error('You cannot delete your own admin account here')
+  const targetUserId = UUID_RE.test(raw) ? raw : await resolveMemberId(ctx.admin, raw)
   const { admin } = ctx
+  const returnTo = safeReturnTo(formData)
+  const listPath = '/admin/members'
 
-  const { data: profile } = await admin
-    .from('profiles')
-    .select('id, full_name, email')
-    .eq('id', targetUserId)
-    .maybeSingle()
-  if (!profile) throw new Error('Member not found')
+  let ok = false
+  try {
+    if (targetUserId === ctx.userId) throw new Error('ADMIN_SELF_DELETE: you cannot delete your own admin account')
+    if (str(formData, 'confirm_phrase').toUpperCase() !== 'DELETE') {
+      throw new Error('DELETE_CONFIRMATION_MISMATCH: type DELETE and the member’s email to confirm')
+    }
 
-  // Wipe storage first (best effort), then delete the auth user — every DB
-  // row cascades from the profile id. Same logic as member self-delete.
-  const { wipeMemberFiles } = await import('@/app/profile/actions')
-  await wipeMemberFiles(admin, targetUserId)
+    const { error: prepError } = await admin.rpc('admin_prepare_member_deletion', {
+      p_user_id: targetUserId,
+      p_admin_id: ctx.userId,
+      p_confirm_email: str(formData, 'confirm_email'),
+      p_reason: str(formData, 'reason') || null,
+    })
+    if (prepError) throw new Error(prepError.message)
 
-  const { error: delError } = await admin.auth.admin.deleteUser(targetUserId)
-  if (delError) throw new Error(delError.message)
+    // Wipe storage first (best effort), then delete the auth user — every DB
+    // row cascades from the profile id. Same logic as member self-delete.
+    const { wipeMemberFiles } = await import('@/app/profile/actions')
+    await wipeMemberFiles(admin, targetUserId)
 
-  await audit(ctx, 'member_deleted', 'profile', targetUserId, {
-    email: profile.email,
-    name: profile.full_name,
-    reason: str(formData, 'reason'),
-  })
+    const { error: delError } = await admin.auth.admin.deleteUser(targetUserId)
+    if (delError && !/not\s*found/i.test(delError.message)) {
+      await audit(ctx, 'admin_member_delete_failed', 'profile', targetUserId, { error: delError.message })
+      throw new Error(`Deletion failed after the audit record was written: ${delError.message}`)
+    }
+    ok = true
+  } catch (err) {
+    if (!returnTo) throw err
+    redirect(withNotice(returnTo, 'error', friendlyAdminError(err instanceof Error ? err.message : String(err))))
+  }
+
   revalidatePath('/admin/members')
   revalidatePath('/admin')
+  if (ok) redirect(withNotice(listPath, 'ok', 'deleted'))
 }
