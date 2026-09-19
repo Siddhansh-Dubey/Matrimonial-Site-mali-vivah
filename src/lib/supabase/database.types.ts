@@ -565,6 +565,7 @@ export type Database = {
           user_id: string
           package_id: number | null
           package_slug: string | null
+          kind: 'package' | 'boost'
           amount_inr: number
           currency: string
           status: Database['public']['Enums']['payment_status']
@@ -582,6 +583,7 @@ export type Database = {
           user_id: string
           package_id?: number | null
           package_slug?: string | null
+          kind?: 'package' | 'boost'
           amount_inr: number
           currency?: string
           status?: Database['public']['Enums']['payment_status']
@@ -599,6 +601,7 @@ export type Database = {
           user_id?: string
           package_id?: number | null
           package_slug?: string | null
+          kind?: 'package' | 'boost'
           amount_inr?: number
           currency?: string
           status?: Database['public']['Enums']['payment_status']
@@ -786,6 +789,8 @@ export type Database = {
           reason: Database['public']['Enums']['report_reason']
           details: string | null
           status: Database['public']['Enums']['report_status']
+          target_type: 'profile' | 'moment'
+          target_id: string | null
           created_at: string
           updated_at: string
         }
@@ -796,6 +801,8 @@ export type Database = {
           reason?: Database['public']['Enums']['report_reason']
           details?: string | null
           status?: Database['public']['Enums']['report_status']
+          target_type?: 'profile' | 'moment'
+          target_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -806,6 +813,8 @@ export type Database = {
           reason?: Database['public']['Enums']['report_reason']
           details?: string | null
           status?: Database['public']['Enums']['report_status']
+          target_type?: 'profile' | 'moment'
+          target_id?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -925,6 +934,7 @@ export type Database = {
           started_at: string
           expires_at: string
           created_via: string
+          payment_id: string | null
           created_at: string
         }
         Insert: {
@@ -934,6 +944,7 @@ export type Database = {
           started_at?: string
           expires_at?: string
           created_via?: string
+          payment_id?: string | null
           created_at?: string
         }
         Update: {
@@ -943,12 +954,165 @@ export type Database = {
           started_at?: string
           expires_at?: string
           created_via?: string
+          payment_id?: string | null
           created_at?: string
         }
         Relationships: [
           {
             foreignKeyName: 'profile_boosts_user_id_fkey'
             columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      mobile_otp_requests: {
+        Row: {
+          id: number
+          user_id: string
+          mobile: string
+          requested_at: string
+          verified_at: string | null
+        }
+        Insert: {
+          id?: never
+          user_id: string
+          mobile: string
+          requested_at?: string
+          verified_at?: string | null
+        }
+        Update: {
+          id?: never
+          user_id?: string
+          mobile?: string
+          requested_at?: string
+          verified_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'mobile_otp_requests_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      profile_boost_config: {
+        Row: {
+          id: number
+          price_inr: number
+          duration_days: number
+          is_active: boolean
+          updated_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          price_inr?: number
+          duration_days?: number
+          is_active?: boolean
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          price_inr?: number
+          duration_days?: number
+          is_active?: boolean
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'profile_boost_config_updated_by_fkey'
+            columns: ['updated_by']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      site_content: {
+        Row: {
+          key: string
+          title: string
+          body: string
+          is_active: boolean
+          sort_order: number
+          updated_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          key: string
+          title?: string
+          body?: string
+          is_active?: boolean
+          sort_order?: number
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          key?: string
+          title?: string
+          body?: string
+          is_active?: boolean
+          sort_order?: number
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'site_content_updated_by_fkey'
+            columns: ['updated_by']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      whatsapp_config: {
+        Row: {
+          id: number
+          community_link: string | null
+          support_link: string | null
+          support_number: string | null
+          is_active: boolean
+          updated_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: number
+          community_link?: string | null
+          support_link?: string | null
+          support_number?: string | null
+          is_active?: boolean
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: number
+          community_link?: string | null
+          support_link?: string | null
+          support_number?: string | null
+          is_active?: boolean
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'whatsapp_config_updated_by_fkey'
+            columns: ['updated_by']
             isOneToOne: false
             referencedRelation: 'profiles'
             referencedColumns: ['id']
@@ -1402,6 +1566,19 @@ export type Database = {
       education_rank: { Args: { p: string | null }; Returns: number }
       boost_my_profile: { Args: Record<string, never>; Returns: Json }
       has_active_boost: { Args: { p_user_id: string }; Returns: boolean }
+      activate_boost_purchase: { Args: { p_payment_id: string }; Returns: Json }
+      request_mobile_otp: { Args: Record<string, never>; Returns: Json }
+      complete_mobile_otp_verification: { Args: Record<string, never>; Returns: Json }
+      report_moment: {
+        Args: {
+          p_moment_id: string
+          p_reason?: Database['public']['Enums']['report_reason']
+          p_details?: string | null
+        }
+        Returns: Json
+      }
+      get_site_content: { Args: { p_key: string }; Returns: Json }
+      get_whatsapp_config: { Args: Record<string, never>; Returns: Json }
       get_featured_profiles: { Args: { p_limit?: number | null }; Returns: Json }
       list_moments: { Args: Record<string, never>; Returns: Json }
       is_admin: { Args: Record<string, never>; Returns: boolean }
@@ -1518,6 +1695,10 @@ export type VerificationRequestRow = Database['public']['Tables']['verification_
 export type MomentRow = Database['public']['Tables']['moments']['Row']
 export type SuccessStoryRow = Database['public']['Tables']['success_stories']['Row']
 export type MatchingConfigRow = Database['public']['Tables']['matching_config']['Row']
+export type MobileOtpRequestRow = Database['public']['Tables']['mobile_otp_requests']['Row']
+export type ProfileBoostConfigRow = Database['public']['Tables']['profile_boost_config']['Row']
+export type SiteContentRow = Database['public']['Tables']['site_content']['Row']
+export type WhatsAppConfigRow = Database['public']['Tables']['whatsapp_config']['Row']
 export type AccountDeletionRequestRow = Database['public']['Tables']['account_deletion_requests']['Row']
 export type ConversationRow = Database['public']['Tables']['conversations']['Row']
 export type ConversationMemberRow = Database['public']['Tables']['conversation_members']['Row']
@@ -1607,6 +1788,7 @@ export type PublicProfileCard = {
   viewer_is_paid?: boolean | null
   mutual_interest?: boolean | null
   contact_phone?: string | null
+  contact_email?: string | null
 }
 
 /** Render-ready output of profile_visibility_reason(). */

@@ -13,13 +13,16 @@ import {
   ShieldCheck,
   Sparkles,
 } from 'lucide-react'
-import { SUPPORT_EMAIL, SUPPORT_PHONE_DISPLAY, whatsappLink } from '@/lib/contact'
+import { SUPPORT_EMAIL, SUPPORT_PHONE_DISPLAY } from '@/lib/contact'
+import { getSiteContent, getWhatsAppConfig, supportWhatsappLink } from '@/lib/site-config'
 
 export const metadata: Metadata = {
   title: 'About Us',
   description:
     'Mali Vivah is a matrimonial platform built for the Mali Samaj — privacy-first, paid-member-visible, and honest in everything it shows you. Reach the team by email, WhatsApp or phone below.',
 }
+
+export const dynamic = 'force-dynamic'
 
 const PRINCIPLES = [
   {
@@ -54,7 +57,17 @@ const PRINCIPLES = [
   },
 ]
 
-export default function AboutPage() {
+export default async function AboutPage() {
+  // Admin-managed copy (PRD M) + WhatsApp configuration (PRD N). Every value
+  // below has a built-in fallback, so the page is identical when the tables
+  // are empty.
+  const [wa, aboutIntro, aboutCta, contactIntro] = await Promise.all([
+    getWhatsAppConfig(),
+    getSiteContent('about_intro'),
+    getSiteContent('about_cta'),
+    getSiteContent('contact_intro'),
+  ])
+
   return (
     <>
       {/* 1 · About us */}
@@ -68,9 +81,8 @@ export default function AboutPage() {
               A care-full corner of the internet for the Mali Samaj
             </h1>
             <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-stone-600 sm:text-base">
-              Mali Vivah began with a simple observation: families in the Mali community deserve a
-              matrimonial space that behaves like our own community does — private by default,
-              respectful of boundaries, and honest about what it can and cannot do.
+              {aboutIntro?.body ??
+                'Mali Vivah began with a simple observation: families in the Mali community deserve a matrimonial space that behaves like our own community does — private by default, respectful of boundaries, and honest about what it can and cannot do.'}
             </p>
           </div>
 
@@ -86,11 +98,11 @@ export default function AboutPage() {
 
           <div className="mx-auto mt-12 max-w-3xl rounded-[26px] bg-maroon-deep px-8 py-10 text-center text-white">
             <h2 className="font-display text-2xl font-bold sm:text-3xl">
-              Same community. Brighter tomorrows.
+              {aboutCta?.title ?? 'Same community. Brighter tomorrows.'}
             </h2>
             <p className="mx-auto mt-3 max-w-xl text-sm text-white/75">
-              Registration is free. Build your profile, add your family photo, and upgrade when you
-              are ready to be found.
+              {aboutCta?.body ??
+                'Registration is free. Build your profile, add your family photo, and upgrade when you are ready to be found.'}
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-3">
               <Link
@@ -121,8 +133,8 @@ export default function AboutPage() {
               Contact us
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-sm text-stone-600 sm:text-base">
-              Questions about a package, a profile, or help finishing registration — a person reads
-              every message.
+              {contactIntro?.body ??
+                'Questions about a package, a profile, or help finishing registration — a person reads every message.'}
             </p>
           </div>
 
@@ -143,7 +155,7 @@ export default function AboutPage() {
             </a>
 
             <a
-              href={whatsappLink('Namaskar, I need help with Mali Vivah')}
+              href={supportWhatsappLink(wa, 'Namaskar, I need help with Mali Vivah')}
               target="_blank"
               rel="noopener noreferrer"
               className="card flex items-start gap-4 p-6 transition-shadow hover:shadow-card-float"
@@ -158,6 +170,27 @@ export default function AboutPage() {
                 </span>
               </span>
             </a>
+
+            {wa.communityLink && (
+              <a
+                href={wa.communityLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="card flex items-start gap-4 p-6 transition-shadow hover:shadow-card-float"
+              >
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-700">
+                  <HeartHandshake className="h-5 w-5" />
+                </span>
+                <span>
+                  <span className="font-display text-lg font-bold text-maroon">
+                    WhatsApp community
+                  </span>
+                  <span className="mt-1 block text-sm text-stone-600">
+                    Join the Mali Vivah community group for announcements and guidance.
+                  </span>
+                </span>
+              </a>
+            )}
 
             <div className="card flex items-start gap-4 p-6">
               <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gold-100 text-gold-700">
