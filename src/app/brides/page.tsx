@@ -1,11 +1,12 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { CalendarDays, ChevronDown, MapPin, Search } from 'lucide-react'
+import { CalendarDays, ChevronDown, MapPin, Search, SlidersHorizontal } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
 import { BrowseGrid } from '@/components/profile/browse-grid'
 import { hasActiveSubscription } from '@/lib/profile/subscription'
-import { AGE_OPTIONS, cityOptions, subCommunityOptions } from '@/lib/profile/profile-schema'
+import { AGE_OPTIONS, cityOptions } from '@/lib/profile/profile-schema'
 import type { MatchCard as MatchCardType } from '@/lib/supabase/database.types'
 
 export const metadata: Metadata = {
@@ -18,7 +19,6 @@ type Params = {
   ageFrom?: string
   ageTo?: string
   location?: string
-  subCommunity?: string
 }
 
 /**
@@ -36,7 +36,6 @@ export default async function BridesPage({ searchParams }: { searchParams?: Para
   const minAge = parseNum(searchParams?.ageFrom)
   const maxAge = parseNum(searchParams?.ageTo)
   const city = searchParams?.location
-  const subCommunity = searchParams?.subCommunity
 
   const isGuest = !user
   const [{ data, error }, isPaid] = await Promise.all([
@@ -45,7 +44,8 @@ export default async function BridesPage({ searchParams }: { searchParams?: Para
       p_min_age: minAge,
       p_max_age: maxAge,
       p_city: city || null,
-      p_sub_community: subCommunity || null,
+      // Sub-community filtering is an advanced (Premium/VIP) filter and
+      // lives on /search — the RPC ignores it for everyone else.
       // Logged-out visitors get the five-card preview; members can browse all
       // matching active profiles (including the profile they created).
       p_limit: isGuest ? 5 : 200,
@@ -82,7 +82,7 @@ export default async function BridesPage({ searchParams }: { searchParams?: Para
           method="get"
           className="mx-auto mt-8 max-w-5xl rounded-[28px] bg-maroon-deep px-6 py-6 shadow-2xl shadow-maroon/30 sm:px-8"
         >
-          <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-[0.8fr_0.8fr_1fr_1fr_auto] lg:items-end">
+          <div className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-[0.8fr_0.8fr_1fr_auto] lg:items-end">
             <Field label="Age from">
               <Select name="ageFrom" options={AGE_OPTIONS.map(String)} defaultValue={searchParams?.ageFrom} />
             </Field>
@@ -97,13 +97,6 @@ export default async function BridesPage({ searchParams }: { searchParams?: Para
                 icon={<MapPin className="h-4 w-4 text-maroon/60" />}
               />
             </Field>
-            <Field label="Sub-community">
-              <Select
-                name="subCommunity"
-                options={[...subCommunityOptions]}
-                defaultValue={searchParams?.subCommunity}
-              />
-            </Field>
             <button
               type="submit"
               className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-gold-400 px-6 py-2.5 text-sm font-bold text-maroon-deep shadow-lg hover:bg-gold-300 sm:w-auto"
@@ -111,6 +104,15 @@ export default async function BridesPage({ searchParams }: { searchParams?: Para
               <Search className="h-4 w-4" /> Search
             </button>
           </div>
+          <p className="mt-4 text-center text-xs text-white/70">
+            <Link
+              href="/search?lookingFor=bride&advanced=1"
+              className="inline-flex items-center gap-1.5 font-semibold text-gold-300 hover:text-gold-200 hover:underline hover:underline-offset-2"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              More filters — sub-community, education, occupation, diet &amp; more
+            </Link>
+          </p>
         </form>
 
         {error && (

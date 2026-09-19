@@ -91,7 +91,8 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
     p_min_age: minAge,
     p_max_age: maxAge,
     p_city: city || null,
-    p_sub_community: subCommunity || null,
+    // Sub-community is an advanced (Premium/VIP) filter — ignored otherwise.
+    p_sub_community: advancedSearch ? subCommunity || null : null,
     p_limit: 120,
     p_education: advancedSearch ? adv.education : null,
     p_occupation: advancedSearch ? adv.occupation : null,

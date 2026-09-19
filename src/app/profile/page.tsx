@@ -322,7 +322,15 @@ export default async function ProfileDashboardPage({
             </div>
 
             <div className="card p-6">
-              <h2 className="font-display text-lg font-bold text-maroon">Account</h2>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="font-display text-lg font-bold text-maroon">Account</h2>
+                <Link
+                  href="/profile/settings"
+                  className="text-xs font-bold text-maroon underline underline-offset-2 hover:text-maroon-dark"
+                >
+                  Settings &amp; privacy
+                </Link>
+              </div>
               <dl className="mt-4 space-y-2 text-sm">
                 <Row label="Email" value={user.email ?? '—'} />
                 <Row label="Mobile" value={profileRes.data?.mobile ?? '—'} />

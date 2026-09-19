@@ -5,20 +5,36 @@ import { unblockPair } from '@/app/admin/actions'
 export const metadata = { title: 'Admin · Blocked Users' }
 export const dynamic = 'force-dynamic'
 
+type Props = { searchParams?: { q?: string } }
+
 /**
  * Blocked Users (PRD L) — every active block pair, who blocked whom and
  * when, with a one-click unblock. Blocks hide the pair from each other's
  * search, browse, Daily 5, chat and Moments site-wide.
  */
-export default async function AdminBlocksPage() {
+export default async function AdminBlocksPage({ searchParams }: Props) {
   const { admin } = await requireAdminPage()
+  const q = (searchParams?.q ?? '').trim()
 
-  const { data: blocks } = await admin
+  // Optional member filter: resolve name/email/mobile → ids, then keep
+  // blocks where either side matches. An empty id list matches nothing.
+  let memberIds: string[] | null = null
+  if (q) {
+    const { data: found } = await admin
+      .from('profiles')
+      .select('id')
+      .or(`full_name.ilike.%${q}%,email.ilike.%${q}%,mobile.ilike.%${q}%`)
+      .limit(50)
+    memberIds = (found ?? []).map((m) => m.id)
+  }
+
+  let query = admin
     .from('blocks')
     .select(
       `
       blocker_id,
       blocked_id,
+      reason,
       created_at,
       blocker:profiles!blocks_blocker_id_fkey (full_name, email),
       blocked:profiles!blocks_blocked_id_fkey (full_name, email)
@@ -26,10 +42,16 @@ export default async function AdminBlocksPage() {
     )
     .order('created_at', { ascending: false })
     .limit(200)
+  if (memberIds !== null) {
+    const ids = memberIds.length > 0 ? memberIds : ['00000000-0000-0000-0000-000000000000']
+    query = query.or(`blocker_id.in.(${ids.join(',')}),blocked_id.in.(${ids.join(',')})`)
+  }
+  const { data: blocks } = await query
 
   type BlockRow = {
     blocker_id: string
     blocked_id: string
+    reason: string | null
     created_at: string
     blocker: { full_name: string; email: string } | null
     blocked: { full_name: string; email: string } | null
@@ -46,10 +68,22 @@ export default async function AdminBlocksPage() {
         </p>
       </div>
 
+      <form action="/admin/blocks" method="get" className="flex gap-2">
+        <input
+          name="q"
+          defaultValue={q}
+          placeholder="Member name, email or mobile…"
+          className="w-full max-w-sm rounded-full border border-stone-300 bg-white px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-maroon/30"
+        />
+        <button type="submit" className="rounded-full bg-maroon px-5 py-2 text-sm font-bold text-white">
+          Search
+        </button>
+      </form>
+
       {rows.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-stone-300 p-10 text-center text-sm text-stone-500">
           <ShieldOff className="mx-auto h-7 w-7 text-stone-300" />
-          <p className="mt-2">No active blocks. Good.</p>
+          <p className="mt-2">{q ? 'No blocks involve that member.' : 'No active blocks. Good.'}</p>
         </div>
       ) : (
         <ul className="space-y-3">
@@ -70,6 +104,7 @@ export default async function AdminBlocksPage() {
                   </p>
                   <p className="mt-0.5 text-xs text-stone-400">
                     since {new Date(b.created_at).toLocaleString('en-IN')}
+                    {b.reason && <> · “{b.reason}”</>}
                   </p>
                 </div>
                 <form action={unblockPair}>

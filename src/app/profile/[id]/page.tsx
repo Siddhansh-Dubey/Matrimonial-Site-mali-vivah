@@ -339,14 +339,20 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                   >
                     <Phone className="h-3.5 w-3.5" /> Call
                   </a>
-                  <a
-                    href={whatsappChatLink(phone)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-3 py-2.5 text-xs font-bold text-white hover:brightness-95"
-                  >
-                    <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
-                  </a>
+                  {profile.whatsapp_allowed === true ? (
+                    <a
+                      href={whatsappChatLink(phone)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-[#25d366] px-3 py-2.5 text-xs font-bold text-white hover:brightness-95"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
+                    </a>
+                  ) : (
+                    <span className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-2.5 text-xs font-semibold text-stone-400">
+                      <MessageCircle className="h-3.5 w-3.5" /> WhatsApp unavailable
+                    </span>
+                  )}
                   {profile.contact_email ? (
                     <a
                       href={`mailto:${profile.contact_email}`}

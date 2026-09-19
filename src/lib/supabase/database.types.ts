@@ -1789,6 +1789,8 @@ export type PublicProfileCard = {
   mutual_interest?: boolean | null
   contact_phone?: string | null
   contact_email?: string | null
+  /** TRUE only for paid + mutual viewers when the owner opted into WhatsApp (migration 20260919050000). */
+  whatsapp_allowed?: boolean | null
 }
 
 /** Render-ready output of profile_visibility_reason(). */
