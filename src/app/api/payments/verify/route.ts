@@ -57,7 +57,7 @@ export async function POST(req: Request) {
   const admin = createAdminClient()
   const { data: payment, error: findError } = await admin
     .from('payments')
-    .select('id, user_id, package_id, status')
+    .select('id, user_id, package_id, status, metadata')
     .eq('razorpay_order_id', orderId)
     .maybeSingle()
   if (findError || !payment) {
@@ -71,6 +71,23 @@ export async function POST(req: Request) {
     .from('payments')
     .update({ razorpay_payment_id: paymentId })
     .eq('id', payment.id)
+
+  const isBoost =
+    (payment.metadata as { kind?: string } | null)?.kind === 'boost' || payment.package_id == null
+
+  if (payment.status !== 'captured' && isBoost) {
+    const { error: actError } = await admin.rpc('activate_purchased_boost', {
+      p_user_id: payment.user_id,
+      p_payment_id: payment.id,
+    })
+    if (actError) {
+      return NextResponse.json(
+        { error: 'Payment verified, but boost activation failed. Please contact support.' },
+        { status: 500 }
+      )
+    }
+    return NextResponse.json({ status: 'ok', kind: 'boost' })
+  }
 
   if (payment.status !== 'captured' && payment.package_id != null) {
     const { error: actError } = await admin.rpc('activate_membership', {
