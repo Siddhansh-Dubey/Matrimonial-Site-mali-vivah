@@ -11,6 +11,8 @@ import { z } from 'zod'
 export const genderOptions = ['male', 'female'] as const
 export const maritalStatusOptions = ['never_married', 'divorced', 'widowed', 'awaiting_divorce'] as const
 export const dietOptions = ['vegetarian', 'non_vegetarian', 'eggetarian', 'jain', 'vegan'] as const
+export const lifestyleOptions = ['never', 'occasionally', 'regularly'] as const
+export const familyTypeOptions = ['joint', 'nuclear'] as const
 
 export const subCommunityOptions = ['Mali', 'Phul Mali', 'Maratha Mali', 'Lal Mali', 'Other'] as const
 export const cityOptions = [
@@ -83,13 +85,27 @@ export const personalSchema = z.object({
   gotra: z.string().optional(),
   city: z.string().min(1, 'required'),
   state: z.string().min(1, 'required'),
+  country: z.string().optional(),
+  nativePlace: z.string().max(120).optional(),
+  smoking: z.enum(lifestyleOptions),
+  drinking: z.enum(lifestyleOptions),
 })
 
 export const educationSchema = z.object({
   education: z.string().min(1, 'required'),
   educationDetails: z.string().optional(),
   occupation: z.string().min(1, 'required'),
+  company: z.string().max(160).optional(),
   annualIncome: z.string().optional(),
+})
+
+export const familySchema = z.object({
+  fatherOccupation: z.string().max(160).optional(),
+  motherOccupation: z.string().max(160).optional(),
+  siblings: z.string().max(240).optional(),
+  familyType: z.enum(familyTypeOptions).optional(),
+  familyLocation: z.string().max(160).optional(),
+  familyDetails: z.string().max(500).optional(),
 })
 
 export const aboutSchema = z.object({
@@ -126,6 +142,7 @@ export const preferencesSchema = z
 
 export type PersonalInput = z.infer<typeof personalSchema>
 export type EducationInput = z.infer<typeof educationSchema>
+export type FamilyInput = z.infer<typeof familySchema>
 export type AboutInput = z.infer<typeof aboutSchema>
 export type PreferencesInput = z.infer<typeof preferencesSchema>
 

@@ -9,6 +9,7 @@ import {
   BookOpen,
   Check,
   Heart,
+  Home,
   ImagePlus,
   Loader2,
   Sparkles,
@@ -23,33 +24,39 @@ import { photoUrl } from '@/lib/profile/photos'
 import {
   aboutSchema,
   educationSchema,
+  familySchema,
   personalSchema,
   preferencesSchema,
   AGE_OPTIONS,
   cityOptions,
   dietOptions,
   educationOptions,
+  familyTypeOptions,
   genderOptions,
   HOBBY_OPTIONS,
   incomeOptions,
+  lifestyleOptions,
   maritalStatusOptions,
   motherTongueOptions,
   occupationOptions,
   subCommunityOptions,
   type AboutInput,
   type EducationInput,
+  type FamilyInput,
   type PersonalInput,
   type PreferencesInput,
 } from '@/lib/profile/profile-schema'
 import type {
   Diet,
+  FamilyType,
   Gender,
+  LifestyleChoice,
   MaritalStatus,
   MatrimonyProfile,
   PartnerPreferences,
 } from '@/lib/supabase/database.types'
 
-const STEPS = ['basic', 'education', 'about', 'preferences', 'photos'] as const
+const STEPS = ['basic', 'education', 'family', 'about', 'preferences', 'photos'] as const
 type Step = (typeof STEPS)[number]
 
 type Errors = Record<string, string | undefined>
@@ -156,12 +163,25 @@ export function ProfileWizard() {
   const [gotra, setGotra] = useState('')
   const [city, setCity] = useState('')
   const [state, setState] = useState('Maharashtra')
+  const [country, setCountry] = useState('India')
+  const [nativePlace, setNativePlace] = useState('')
+  const [smoking, setSmoking] = useState<LifestyleChoice>('never')
+  const [drinking, setDrinking] = useState<LifestyleChoice>('never')
 
   // education
   const [education, setEducation] = useState('')
   const [educationDetails, setEducationDetails] = useState('')
   const [occupation, setOccupation] = useState('')
+  const [company, setCompany] = useState('')
   const [annualIncome, setAnnualIncome] = useState('')
+
+  // family
+  const [fatherOccupation, setFatherOccupation] = useState('')
+  const [motherOccupation, setMotherOccupation] = useState('')
+  const [siblings, setSiblings] = useState('')
+  const [familyType, setFamilyType] = useState('')
+  const [familyLocation, setFamilyLocation] = useState('')
+  const [familyDetails, setFamilyDetails] = useState('')
 
   // about
   const [aboutMe, setAboutMe] = useState('')
@@ -236,10 +256,21 @@ export function ProfileWizard() {
           setGotra(profile.gotra ?? '')
           setCity(profile.city ?? '')
           setState(profile.state)
+          setCountry(profile.country || 'India')
+          setNativePlace(profile.native_place ?? '')
+          setSmoking(profile.smoking)
+          setDrinking(profile.drinking)
           setEducation(profile.education ?? '')
           setEducationDetails(profile.education_details ?? '')
           setOccupation(profile.occupation ?? '')
+          setCompany(profile.company ?? '')
           setAnnualIncome(profile.annual_income ?? '')
+          setFatherOccupation(profile.father_occupation ?? '')
+          setMotherOccupation(profile.mother_occupation ?? '')
+          setSiblings(profile.siblings ?? '')
+          setFamilyType(profile.family_type ?? '')
+          setFamilyLocation(profile.family_location ?? '')
+          setFamilyDetails(profile.family_details ?? '')
           setAboutMe(profile.about_me ?? '')
           setHobbies(profile.hobbies ?? [])
         }
@@ -312,10 +343,22 @@ export function ProfileWizard() {
       gotra: gotra || null,
       city,
       state,
+      country: country || 'India',
+      native_place: nativePlace || null,
+      smoking,
+      drinking,
       education,
       education_details: educationDetails || null,
       occupation,
+      company: company || null,
       annual_income: annualIncome || null,
+      father_occupation: fatherOccupation || null,
+      mother_occupation: motherOccupation || null,
+      siblings: siblings || null,
+      // Optional — omitted when unset so the DB default / existing value stands.
+      ...(familyType ? { family_type: familyType as FamilyType } : {}),
+      family_location: familyLocation || null,
+      family_details: familyDetails || null,
       about_me: aboutMe || null,
       hobbies,
       status: publish ? 'active' : 'draft',
@@ -376,6 +419,10 @@ export function ProfileWizard() {
         gotra,
         city,
         state,
+        country,
+        nativePlace,
+        smoking,
+        drinking,
       })
       if (!r.success) {
         for (const issue of r.error.issues) {
@@ -383,10 +430,20 @@ export function ProfileWizard() {
         }
       }
     } else if (s === 'education') {
-      const r = educationSchema.safeParse({ education, educationDetails, occupation, annualIncome })
+      const r = educationSchema.safeParse({ education, educationDetails, occupation, company, annualIncome })
       if (!r.success) {
         for (const issue of r.error.issues) next[issue.path[0] as string] = issue.message
       }
+    } else if (s === 'family') {
+      const r = familySchema.safeParse({
+        fatherOccupation,
+        motherOccupation,
+        siblings,
+        familyType: familyType || undefined,
+        familyLocation,
+        familyDetails,
+      })
+      if (!r.success) for (const issue of r.error.issues) next[issue.path[0] as string] = issue.message
     } else if (s === 'about') {
       const r = aboutSchema.safeParse({ aboutMe, hobbies })
       if (!r.success) for (const issue of r.error.issues) next[issue.path[0] as string] = issue.message
@@ -621,6 +678,7 @@ export function ProfileWizard() {
   const stepTitles: Record<Step, { icon: typeof User; title: string }> = {
     basic: { icon: User, title: t('profile.step.basic.title') },
     education: { icon: BookOpen, title: t('profile.step.education.title') },
+    family: { icon: Home, title: t('profile.step.family.title') },
     about: { icon: Heart, title: t('profile.step.about.title') },
     preferences: { icon: Users, title: t('profile.step.preferences.title') },
     photos: { icon: ImagePlus, title: t('profile.step.photos.title') },
@@ -764,6 +822,37 @@ export function ProfileWizard() {
                 </Field>
               </div>
 
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field label={t('profile.country')} error={errors.country}>
+                  <input value={country} onChange={(e) => setCountry(e.target.value)} className="input" />
+                </Field>
+                <Field label={t('profile.nativePlace')} hint={t('profile.nativePlace.hint')}>
+                  <input
+                    value={nativePlace}
+                    onChange={(e) => setNativePlace(e.target.value)}
+                    className="input"
+                    placeholder={t('profile.nativePlace.placeholder')}
+                  />
+                </Field>
+              </div>
+
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field label={t('profile.smoking')}>
+                  <Select
+                    value={smoking}
+                    onChange={(v) => setSmoking(v as LifestyleChoice)}
+                    options={lifestyleOptions}
+                  />
+                </Field>
+                <Field label={t('profile.drinking')}>
+                  <Select
+                    value={drinking}
+                    onChange={(v) => setDrinking(v as LifestyleChoice)}
+                    options={lifestyleOptions}
+                  />
+                </Field>
+              </div>
+
               <Field label={t('profile.gotra')} hint={t('profile.gotra.hint')}>
                 <input value={gotra} onChange={(e) => setGotra(e.target.value)} className="input" placeholder={t('profile.gotra.placeholder')} />
               </Field>
@@ -786,8 +875,71 @@ export function ProfileWizard() {
               <Field label={t('profile.occupation')} error={errors.occupation}>
                 <Select value={occupation} onChange={setOccupation} options={occupationOptions} allowEmpty />
               </Field>
+              <Field label={t('profile.company')} hint={t('profile.company.hint')}>
+                <input
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                  className="input"
+                  placeholder={t('profile.company.placeholder')}
+                />
+              </Field>
               <Field label={t('profile.annualIncome')}>
                 <Select value={annualIncome} onChange={setAnnualIncome} options={incomeOptions} allowEmpty />
+              </Field>
+            </div>
+          )}
+
+          {step === 'family' && (
+            <div className="space-y-5">
+              <p className="text-sm text-stone-600">{t('profile.family.intro')}</p>
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field label={t('profile.family.fatherOccupation')} error={errors.fatherOccupation}>
+                  <input
+                    value={fatherOccupation}
+                    onChange={(e) => setFatherOccupation(e.target.value)}
+                    className="input"
+                    placeholder={t('profile.family.fatherOccupation.placeholder')}
+                  />
+                </Field>
+                <Field label={t('profile.family.motherOccupation')} error={errors.motherOccupation}>
+                  <input
+                    value={motherOccupation}
+                    onChange={(e) => setMotherOccupation(e.target.value)}
+                    className="input"
+                    placeholder={t('profile.family.motherOccupation.placeholder')}
+                  />
+                </Field>
+              </div>
+              <Field label={t('profile.family.siblings')} error={errors.siblings}>
+                <input
+                  value={siblings}
+                  onChange={(e) => setSiblings(e.target.value)}
+                  className="input"
+                  placeholder={t('profile.family.siblings.placeholder')}
+                />
+              </Field>
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field label={t('profile.family.type')}>
+                  <Select value={familyType} onChange={setFamilyType} options={familyTypeOptions} allowEmpty />
+                </Field>
+                <Field label={t('profile.family.location')} error={errors.familyLocation}>
+                  <input
+                    value={familyLocation}
+                    onChange={(e) => setFamilyLocation(e.target.value)}
+                    className="input"
+                    placeholder={t('profile.family.location.placeholder')}
+                  />
+                </Field>
+              </div>
+              <Field label={t('profile.family.details')} hint={t('profile.family.details.hint')}>
+                <textarea
+                  rows={3}
+                  value={familyDetails}
+                  maxLength={500}
+                  onChange={(e) => setFamilyDetails(e.target.value)}
+                  className="input resize-none"
+                  placeholder={t('profile.family.details.placeholder')}
+                />
               </Field>
             </div>
           )}
