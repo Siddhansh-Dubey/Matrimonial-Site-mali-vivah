@@ -1656,7 +1656,7 @@ export type Database = {
       refund_membership: { Args: { p_payment_id: string }; Returns: Json }
       cancel_stale_payments: { Args: Record<string, never>; Returns: number }
       log_activity: {
-        Args: { p_user_id: string; p_event: string; p_metadata?: Json }
+        Args: { p_user_id: string; p_event: string; p_metadata?: Json; p_idempotency_key?: string | null }
         Returns: number | null
       }
       get_daily_matches: { Args: { p_limit?: number | null }; Returns: Json }
@@ -1737,6 +1737,10 @@ export type Database = {
         }
         Returns: string
       }
+      log_account_deletion: { Args: { p_reason?: string | null }; Returns: number | null }
+      is_profile_completed: { Args: { p_user_id: string }; Returns: boolean }
+      canonical_activity_events: { Args: Record<string, never>; Returns: string[] }
+      admin_analytics: { Args: { p_days?: number | null }; Returns: Json }
     }
     Enums: {
       for_whom: 'self' | 'son' | 'daughter'
