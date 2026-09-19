@@ -9,6 +9,7 @@
  * - 20260912130000_public_profile_browse.sql  (public browse)
  * - 20260915000000_enum_extensions.sql        (Phase 1 enums)
  * - 20260915010000_profile_model_family_photo.sql (communities, family photo, publish gate)
+ * - 20260919080000_community_hierarchy_integrity.sql (hierarchy trigger, community key on cards)
  * - 20260915020000_packages_pricing.sql       (canonical pricing, membership resolvers)
  * - 20260915030000_notifications.sql          (notifications + bell RPCs)
  * - 20260915100000_visibility.sql             (is_profile_public, visibility reason, sweeps)
@@ -251,6 +252,20 @@ export type Database = {
             columns: ['user_id']
             isOneToOne: true
             referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'matrimony_profiles_community_id_fkey'
+            columns: ['community_id']
+            isOneToOne: false
+            referencedRelation: 'communities'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'matrimony_profiles_sub_community_id_fkey'
+            columns: ['sub_community_id']
+            isOneToOne: false
+            referencedRelation: 'sub_communities'
             referencedColumns: ['id']
           },
         ]
@@ -1817,6 +1832,8 @@ export type MatchCard = {
   age?: number | null
   height_cm?: number | null
   sub_community?: string | null
+  /** Community name from the hierarchy (search_matches v4, migration 20260919080000). */
+  community?: string | null
   marital_status?: MaritalStatus | null
   education?: string | null
   occupation: string | null
@@ -1842,6 +1859,8 @@ export type PublicProfileCard = {
   height_cm: number | null
   religion: string | null
   sub_community: string | null
+  /** Community name from the hierarchy (get_public_profile v5, migration 20260919080000). */
+  community?: string | null
   mother_tongue: string | null
   marital_status: MaritalStatus | null
   education: string | null

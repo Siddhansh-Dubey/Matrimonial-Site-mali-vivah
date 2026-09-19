@@ -196,7 +196,7 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                 )}
               </div>
               <span className="shrink-0 rounded-full bg-gold-300 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-maroon-deep">
-                {canSeeDetails ? (profile.sub_community ?? 'Mali') : 'Mali'}
+                {canSeeDetails ? (profile.sub_community ?? profile.community ?? 'Member') : (profile.community ?? 'Member')}
               </span>
             </div>
 
@@ -223,6 +223,8 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                 <Item icon={Briefcase} label="Drinking" value={label(profile.drinking ?? 'never')} />
                 <Item icon={Heart} label="Marital status" value={label(profile.marital_status ?? 'never_married')} />
                 <Item icon={UserIcon} label="Diet" value={label(profile.diet ?? 'vegetarian')} />
+                {profile.community && <Item icon={Users} label="Community" value={profile.community} />}
+                {profile.sub_community && <Item icon={Users} label="Sub-community" value={profile.sub_community} />}
                 <Item icon={UserIcon} label="Mother tongue" value={profile.mother_tongue ?? 'Marathi'} />
                 {profile.gotra && <Item icon={UserIcon} label="Gotra" value={profile.gotra} />}
               </dl>

@@ -14,8 +14,8 @@ import {
   incomeOptions,
   maritalStatusOptions,
   occupationOptions,
-  subCommunityOptions,
 } from '@/lib/profile/profile-schema'
+import { loadCommunityHierarchy } from '@/lib/profile/community'
 import type { Diet, Gender, MaritalStatus, MatchCard as MatchCardType } from '@/lib/supabase/database.types'
 
 export const metadata: Metadata = { title: 'Search profiles' }
@@ -47,20 +47,23 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [advRes, sub, subsRes] = await Promise.all([
+  const [advRes, sub, hierarchy] = await Promise.all([
     supabase.rpc('has_benefit', { p_key: 'advanced_search' }),
     hasActiveSubscription(supabase, user.id),
-    // Community values come from the database (seeded: Mali + sub-communities).
-    supabase
-      .from('sub_communities')
-      .select('name')
-      .eq('is_active', true)
-      .order('sort_order', { ascending: true }),
+    // Community choices come ONLY from the database hierarchy (active rows,
+    // sort_order preserved). No hard-coded fallback list.
+    loadCommunityHierarchy(supabase),
   ])
   const advancedSearch = advRes.data === true
   const isPaid = sub
-  const dbSubCommunities = ((subsRes.data ?? []) as { name: string }[]).map((r) => r.name)
-  const subOptions = dbSubCommunities.length > 0 ? dbSubCommunities : [...subCommunityOptions]
+  // The RPC contract stays TEXT (bookmarked URLs keep working); the value is
+  // a real sub_communities.name and the RPC resolves it by ID internally.
+  // Grouped per community so a future second community never produces one
+  // flat mixed list.
+  const subGroups = hierarchy.communities.map((c) => ({
+    community: c,
+    subs: hierarchy.subCommunities.filter((s) => s.communityId === c.id),
+  }))
 
   const lookingFor =
     searchParams?.lookingFor === 'groom' ? 'male' : searchParams?.lookingFor === 'bride' ? 'female' : null
@@ -193,10 +196,18 @@ export default async function SearchPage({ searchParams }: { searchParams?: Para
               <div className="mt-4 grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2 lg:grid-cols-4">
                 <Field label="Sub-community">
                   <select name="subCommunity" defaultValue={searchParams?.subCommunity ?? ''} className="w-full appearance-none rounded-full border border-white bg-white py-2.5 pl-4 pr-9 text-sm font-medium text-stone-800 outline-none focus:ring-2 focus:ring-gold-400">
-                    <option value="">Any</option>
-                    {subOptions.map((o) => (
-                      <option key={o} value={o}>{o}</option>
-                    ))}
+                    <option value="">{hierarchy.error ? 'Communities unavailable' : 'Any'}</option>
+                    {subGroups.length === 1
+                      ? subGroups[0].subs.map((o) => (
+                          <option key={o.id} value={o.name}>{o.name}</option>
+                        ))
+                      : subGroups.map((g) => (
+                          <optgroup key={g.community.id} label={g.community.name}>
+                            {g.subs.map((o) => (
+                              <option key={o.id} value={o.name}>{o.name}</option>
+                            ))}
+                          </optgroup>
+                        ))}
                   </select>
                 </Field>
                 <Field label="Education">
