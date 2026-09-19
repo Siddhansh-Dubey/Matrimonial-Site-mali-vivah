@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Twenty-five migrations, run in filename order:
+Twenty-seven migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -120,6 +120,23 @@ operator-managed content, safety + analytics — run after 1–17):
     slide earlier) and is idempotent; the expiry notification states the
     period's real length. Refuses to run until 20 is applied. Backfills one
     entitlement per existing boost row. See "Profile Boost model" below.
+26. `20260919070000_profile_views_access.sql` — profile-view access model.
+27. `20260919080000_community_hierarchy_integrity.sql` — makes the existing
+    `communities → sub_communities` hierarchy **authoritative**. New
+    `enforce_community_hierarchy()` trigger on `matrimony_profiles`: a
+    `sub_community_id` must belong to `community_id` (`COMMUNITY_MISMATCH`),
+    inactive rows cannot be newly selected (`COMMUNITY_INACTIVE`),
+    `community_id` is derived from the sub-community when absent, and the
+    legacy `sub_community` text is kept equal to the linked row's name (or
+    resolved to a row when an old client writes only text). Partner
+    preference arrays (`preferred_communities`, `preferred_sub_communities`)
+    stay `TEXT[]` but are canonicalised to real, active row names by
+    `normalise_partner_community_prefs()`. One-off backfill repairs
+    mismatched / missing links. `search_matches()` v4 resolves the
+    `p_sub_community` TEXT filter through `sub_community_id` (legacy text
+    only for rows without an ID) and `get_public_profile()` v5 / search cards
+    gain an additive `community` key. No table is created and the text
+    column is NOT dropped.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's

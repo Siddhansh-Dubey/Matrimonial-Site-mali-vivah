@@ -29,7 +29,10 @@ export function MatchCard({
           .join(' · ')
       : null
 
-  const badge = isPaid ? (match.sub_community ?? 'Mali') : 'Mali'
+  // Community name comes from the DB hierarchy (search_matches v4). Paid
+  // viewers see the sub-community; everyone else the community itself.
+  const community = match.community ?? 'Mali'
+  const badge = isPaid ? (match.sub_community ?? community) : community
 
   return (
     <article className="flex h-full flex-col overflow-hidden rounded-[22px] bg-white shadow-card-float ring-1 ring-stone-100/80">

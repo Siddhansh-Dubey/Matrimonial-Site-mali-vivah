@@ -12,7 +12,11 @@ export const genderOptions = ['male', 'female'] as const
 export const maritalStatusOptions = ['never_married', 'divorced', 'widowed', 'awaiting_divorce'] as const
 export const dietOptions = ['vegetarian', 'non_vegetarian', 'eggetarian', 'jain', 'vegan'] as const
 
-export const subCommunityOptions = ['Mali', 'Phul Mali', 'Maratha Mali', 'Lal Mali', 'Other'] as const
+/**
+ * Community / sub-community choices are NOT listed here on purpose: the
+ * database hierarchy (public.communities → public.sub_communities) is the
+ * only source of truth — see src/lib/profile/community.ts.
+ */
 export const cityOptions = [
   'Mumbai',
   'Pune',
@@ -82,7 +86,9 @@ export const personalSchema = z.object({
   maritalStatus: z.enum(maritalStatusOptions),
   diet: z.enum(dietOptions),
   motherTongue: z.string().min(1, 'required'),
-  subCommunity: z.string().min(1, 'required'),
+  /** DB row ids from the community hierarchy (validated again server-side). */
+  communityId: z.string().uuid('required'),
+  subCommunityId: z.string().uuid('required'),
   gotra: z.string().optional(),
   city: z.string().min(1, 'required'),
   state: z.string().min(1, 'required'),

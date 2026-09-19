@@ -64,7 +64,11 @@ export default async function ProfileDashboardPage({
     viewStatsRes,
   ] = await Promise.all([
     supabase.from('profiles').select('*').eq('id', user.id).maybeSingle(),
-    supabase.from('matrimony_profiles').select('*').eq('user_id', user.id).maybeSingle(),
+    supabase
+      .from('matrimony_profiles')
+      .select('*, community:communities(name), sub_community_row:sub_communities(name)')
+      .eq('user_id', user.id)
+      .maybeSingle(),
     supabase.from('partner_preferences').select('*').eq('profile_id', user.id).maybeSingle(),
     supabase.from('profile_photos').select('*').eq('profile_id', user.id).order('sort_order'),
     getActiveSubscription(supabase, user.id),
@@ -108,7 +112,12 @@ export default async function ProfileDashboardPage({
   }
 
   const fullName = profileRes.data?.full_name ?? 'Member'
-  const mp = mpRes.data as MatrimonyProfile | null
+  const mp = mpRes.data as
+    | (MatrimonyProfile & {
+        community: { name: string } | null
+        sub_community_row: { name: string } | null
+      })
+    | null
   const pp = ppRes.data as PartnerPreferences | null
   const photos = photoRes.data ?? []
   const profilePhotos = photos.filter((p) => (p.kind ?? 'profile_photo') === 'profile_photo')
@@ -249,7 +258,9 @@ export default async function ProfileDashboardPage({
                     {[mp?.education, mp?.occupation].filter(Boolean).join(' · ') || 'Add your education & occupation'}
                   </p>
                   <p className="mt-1 inline-flex items-center gap-1.5 text-xs text-stone-500">
-                    {mp?.sub_community ?? 'Sub-community not set'}
+                    {[mp?.community?.name, mp?.sub_community_row?.name ?? mp?.sub_community]
+                      .filter(Boolean)
+                      .join(' · ') || 'Community not set'}
                     {mp?.verified_at && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 font-bold text-emerald-800">
                         <BadgeCheck className="h-3 w-3" /> Verified

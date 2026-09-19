@@ -22,6 +22,12 @@ import { isSupabaseConfigured } from '@/lib/env'
 import { createClient } from '@/lib/supabase/client'
 import { photoUrl } from '@/lib/profile/photos'
 import {
+  loadCommunityHierarchy,
+  resolveProfileCommunity,
+  subCommunitiesOf,
+  type CommunityHierarchy,
+} from '@/lib/profile/community'
+import {
   aboutSchema,
   educationSchema,
   familySchema,
@@ -39,7 +45,6 @@ import {
   maritalStatusOptions,
   motherTongueOptions,
   occupationOptions,
-  subCommunityOptions,
   type AboutInput,
   type EducationInput,
   type FamilyInput,
@@ -159,7 +164,10 @@ export function ProfileWizard() {
   const [maritalStatus, setMaritalStatus] = useState<MaritalStatus>('never_married')
   const [diet, setDiet] = useState<Diet>('vegetarian')
   const [motherTongue, setMotherTongue] = useState('Marathi')
-  const [subCommunity, setSubCommunity] = useState('Mali')
+  // Community hierarchy — the selected DB rows are the source of truth;
+  // the display name (legacy `sub_community` text) is DERIVED from them.
+  const [communityId, setCommunityId] = useState('')
+  const [subCommunityId, setSubCommunityId] = useState('')
   const [gotra, setGotra] = useState('')
   const [city, setCity] = useState('')
   const [state, setState] = useState('Maharashtra')
@@ -204,10 +212,19 @@ export function ProfileWizard() {
   const [preferredFamilyType, setPreferredFamilyType] = useState<'' | FamilyType>('')
   const [prefNote, setPrefNote] = useState('')
 
-  // Community hierarchy — loaded from the database (communities →
-  // sub_communities) so the platform can grow beyond Mali without a code
-  // change. Falls back to the built-in list when the tables are absent.
-  const [subCommunities, setSubCommunities] = useState<string[]>([...subCommunityOptions])
+  // Community hierarchy — loaded from public.communities / sub_communities
+  // (active rows, sort_order preserved). No hard-coded fallback: if the
+  // lookup fails the selectors show an explicit error state instead.
+  const [hierarchy, setHierarchy] = useState<CommunityHierarchy>({
+    communities: [],
+    subCommunities: [],
+    error: null,
+  })
+  const availableSubCommunities = subCommunitiesOf(hierarchy, communityId || null)
+  const selectedCommunity = hierarchy.communities.find((c) => c.id === communityId) ?? null
+  // The display name (legacy `sub_community` text) is DERIVED from this row
+  // at save time — never an independent source of truth.
+  const selectedSubCommunity = availableSubCommunities.find((s) => s.id === subCommunityId) ?? null
 
   // photos — profile photos and (separately) the ONE family photo. The
   // publish gate requires both blocks before a profile can go live.
@@ -232,12 +249,14 @@ export function ProfileWizard() {
       setUserId(uid)
 
       if (uid) {
-        const [mp, pp, ph] = await Promise.all([
+        const [mp, pp, ph, tree] = await Promise.all([
           supabase.from('matrimony_profiles').select('*').eq('user_id', uid).maybeSingle(),
           supabase.from('partner_preferences').select('*').eq('profile_id', uid).maybeSingle(),
           supabase.from('profile_photos').select('*').eq('profile_id', uid).order('sort_order', { ascending: true }),
+          loadCommunityHierarchy(supabase),
         ])
         if (cancelled) return
+        setHierarchy(tree)
         const profile = mp.data as MatrimonyProfile | null
         setExisting(profile)
         const prefRow = pp.data as PartnerPreferences | null
@@ -260,7 +279,11 @@ export function ProfileWizard() {
           setMaritalStatus(profile.marital_status)
           setDiet(profile.diet)
           setMotherTongue(profile.mother_tongue)
-          setSubCommunity(profile.sub_community ?? 'Mali')
+          // Initialise from community_id / sub_community_id; legacy rows that
+          // only carry the text are resolved against the DB rows (cases A–D).
+          const resolved = resolveProfileCommunity(tree, profile)
+          setCommunityId(resolved.communityId)
+          setSubCommunityId(resolved.subCommunityId)
           setGotra(profile.gotra ?? '')
           setCity(profile.city ?? '')
           setState(profile.state)
@@ -298,17 +321,6 @@ export function ProfileWizard() {
           setPreferredNativePlace(prefRow.preferred_native_place ?? '')
           setPreferredFamilyType(prefRow.preferred_family_type ?? '')
           setPrefNote(prefRow.note ?? '')
-        }
-
-        // Community hierarchy from the DB (active rows, anon-readable) — the
-        // app stays data-driven so future communities need no code change.
-        const { data: subRows } = await supabase
-          .from('sub_communities')
-          .select('name')
-          .eq('is_active', true)
-          .order('sort_order', { ascending: true })
-        if (subRows && subRows.length > 0) {
-          setSubCommunities(subRows.map((r) => r.name as string))
         }
 
         // ---- resume where the user left off ----
@@ -352,6 +364,18 @@ export function ProfileWizard() {
       console.warn('[profile] ensure_my_profile skipped:', ensureError.message)
     }
 
+    // Community fields are only written when the member has a real selection.
+    // If the hierarchy could not be loaded (or a legacy row could not be
+    // resolved yet — CASE D), a draft save from a later step must NOT wipe the
+    // values already stored; the basic-step validation still requires a pick.
+    const communityPayload = selectedSubCommunity
+      ? {
+          community_id: selectedSubCommunity.communityId,
+          sub_community_id: selectedSubCommunity.id,
+          sub_community: selectedSubCommunity.name,
+        }
+      : {}
+
     const mpPayload = {
       user_id: userId,
       profile_for: profileFor,
@@ -361,7 +385,9 @@ export function ProfileWizard() {
       marital_status: maritalStatus,
       diet,
       mother_tongue: motherTongue,
-      sub_community: subCommunity,
+      // Authoritative hierarchy IDs. The legacy text is derived from the
+      // selected DB row (and re-synced by the DB trigger), never typed.
+      ...communityPayload,
       gotra: gotra || null,
       city,
       state,
@@ -414,7 +440,9 @@ export function ProfileWizard() {
       setFormError(
         mpError.message.startsWith('PROFILE_INCOMPLETE')
           ? mpError.message.replace(/^PROFILE_INCOMPLETE: ?/, 'Complete your profile before publishing: ')
-          : mpError.message
+          : /^COMMUNITY_(MISMATCH|INACTIVE|INVALID)/.test(mpError.message)
+            ? t('profile.error.community')
+            : mpError.message
       )
       return false
     }
@@ -440,7 +468,8 @@ export function ProfileWizard() {
         maritalStatus,
         diet,
         motherTongue,
-        subCommunity,
+        communityId,
+        subCommunityId,
         gotra,
         city,
         state,
@@ -840,9 +869,55 @@ export function ProfileWizard() {
                 <Field label={t('profile.motherTongue')} error={errors.motherTongue}>
                   <Select value={motherTongue} onChange={setMotherTongue} options={motherTongueOptions} />
                 </Field>
-                <Field label={t('profile.subCommunity')} error={errors.subCommunity}>
-                  <Select value={subCommunity} onChange={setSubCommunity} options={subCommunities} />
+                <Field label={t('profile.community')} error={errors.communityId ?? (hierarchy.error ? t('profile.community.loadError') : undefined)}>
+                  <select
+                    value={communityId}
+                    onChange={(e) => {
+                      const next = e.target.value
+                      setCommunityId(next)
+                      // A sub-community from another community is never kept.
+                      if (!subCommunitiesOf(hierarchy, next).some((s) => s.id === subCommunityId)) {
+                        setSubCommunityId('')
+                      }
+                    }}
+                    className="input"
+                    disabled={hierarchy.communities.length === 0}
+                  >
+                    <option value="">{hierarchy.error ? t('profile.community.unavailable') : t('profile.community.select')}</option>
+                    {hierarchy.communities.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
                 </Field>
+              </div>
+
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <Field
+                  label={t('profile.subCommunity')}
+                  error={errors.subCommunityId}
+                  hint={!communityId ? t('profile.subCommunity.pickCommunityFirst') : undefined}
+                >
+                  <select
+                    value={subCommunityId}
+                    onChange={(e) => setSubCommunityId(e.target.value)}
+                    className="input disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400"
+                    disabled={!communityId || availableSubCommunities.length === 0}
+                  >
+                    <option value="">{t('profile.subCommunity.select')}</option>
+                    {availableSubCommunities.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                {selectedCommunity && selectedSubCommunity && (
+                  <p className="self-end pb-3 text-xs text-stone-500">
+                    {selectedCommunity.name} · {selectedSubCommunity.name}
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
@@ -1054,7 +1129,15 @@ export function ProfileWizard() {
               </Field>
 
               <Field label={t('profile.pref.subCommunities')}>
-                <MultiSelect options={subCommunities} selected={preferredSubCommunities} onChange={setPreferredSubCommunities} />
+                {hierarchy.error ? (
+                  <p className="text-xs text-brand-700">{t('profile.community.loadError')}</p>
+                ) : (
+                  <MultiSelect
+                    options={Array.from(new Set(hierarchy.subCommunities.map((s) => s.name)))}
+                    selected={preferredSubCommunities}
+                    onChange={setPreferredSubCommunities}
+                  />
+                )}
               </Field>
 
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">

@@ -56,7 +56,11 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
   const admin = createAdminClient()
   const [profileRes, mpRes, photoRes] = await Promise.all([
     admin.from('profiles').select('full_name, mobile').eq('id', targetId).maybeSingle(),
-    admin.from('matrimony_profiles').select('*').eq('user_id', targetId).maybeSingle(),
+    admin
+      .from('matrimony_profiles')
+      .select('*, community:communities(name), sub_community_row:sub_communities(name)')
+      .eq('user_id', targetId)
+      .maybeSingle(),
     admin
       .from('profile_photos')
       .select('storage_path, kind, is_primary, sort_order')
@@ -149,7 +153,10 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
 
   section('Personal', page, bold)
   line('Religion', mp.religion)
-  line('Community', ['Mali', mp.sub_community].filter(Boolean).join(' · '))
+  // Community from the DB hierarchy (IDs authoritative; legacy text fallback).
+  const communityName = (mp.community as { name: string } | null)?.name ?? null
+  const subCommunityName = (mp.sub_community_row as { name: string } | null)?.name ?? mp.sub_community
+  line('Community', [communityName, subCommunityName].filter(Boolean).join(' · ') || null)
   line('Mother tongue', mp.mother_tongue)
   line('Gotra', mp.gotra)
   line('Diet', titleCase(mp.diet))
