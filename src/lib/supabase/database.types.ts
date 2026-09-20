@@ -23,6 +23,7 @@
  * - 20260919120000_admin_member_management.sql (admin hold / suspension columns, admin_* member RPCs)
  * - 20260920000000_featured_boost_ordering.sql (deterministic featured + boost-first search ordering)
  * - 20260920140000_privacy_account_lifecycle.sql (fail-safe deletion, payment/report retention, privacy RLS)
+ * - 20260920150000_payment_membership_lifecycle_audit.sql (payment state machine, idempotency, webhook ledger, ownership constraints)
  *
  * If you change the SQL, update this file to match.
  */
@@ -611,6 +612,8 @@ export type Database = {
           package_id: number | null
           package_slug: string | null
           kind: 'package' | 'boost'
+          idempotency_key: string | null
+          duration_days: number | null
           amount_inr: number
           currency: string
           status: Database['public']['Enums']['payment_status']
@@ -629,6 +632,8 @@ export type Database = {
           package_id?: number | null
           package_slug?: string | null
           kind?: 'package' | 'boost'
+          idempotency_key?: string | null
+          duration_days?: number | null
           amount_inr: number
           currency?: string
           status?: Database['public']['Enums']['payment_status']
@@ -647,6 +652,8 @@ export type Database = {
           package_id?: number | null
           package_slug?: string | null
           kind?: 'package' | 'boost'
+          idempotency_key?: string | null
+          duration_days?: number | null
           amount_inr?: number
           currency?: string
           status?: Database['public']['Enums']['payment_status']
@@ -668,6 +675,33 @@ export type Database = {
             referencedColumns: ['id']
           },
         ]
+      }
+      payment_webhook_events: {
+        Row: {
+          event_id: string
+          event_type: string
+          razorpay_order_id: string | null
+          razorpay_payment_id: string | null
+          received_at: string
+          processed_at: string
+        }
+        Insert: {
+          event_id: string
+          event_type: string
+          razorpay_order_id?: string | null
+          razorpay_payment_id?: string | null
+          received_at?: string
+          processed_at?: string
+        }
+        Update: {
+          event_id?: string
+          event_type?: string
+          razorpay_order_id?: string | null
+          razorpay_payment_id?: string | null
+          received_at?: string
+          processed_at?: string
+        }
+        Relationships: []
       }
       notifications: {
         Row: {

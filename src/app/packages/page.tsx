@@ -79,10 +79,16 @@ export default async function PackagesPage({
             )}
           </div>
         )}
+        {searchParams?.payment === 'pending' && (
+          <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-center text-sm text-amber-900">
+            Razorpay has authorized the payment, but capture is still pending. Your membership is
+            not shown as active until the server receives confirmation. Refresh this page shortly.
+          </div>
+        )}
         {searchParams?.payment === 'cancelled' && (
           <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-stone-200 bg-white/70 px-5 py-4 text-center text-sm text-stone-600">
-            The checkout was closed before completing payment — nothing was charged. You can
-            restart whenever you are ready.
+            Checkout was closed before the server confirmed a capture. Your payment may still be
+            processing; refresh this page or contact support if you were charged.
           </div>
         )}
 

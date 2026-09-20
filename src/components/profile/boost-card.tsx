@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, Rocket } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -75,6 +75,7 @@ export function BoostCard({
   const [buying, setBuying] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const attemptKey = useRef<string | null>(null)
 
   async function boost() {
     if (!isSupabaseConfigured) return
@@ -128,10 +129,14 @@ export function BoostCard({
         router.push('/login')
         return
       }
+      attemptKey.current ??= crypto.randomUUID()
       const res = await fetch('/api/payments/order', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item: 'boost' }),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': attemptKey.current,
+        },
+        body: JSON.stringify({ item: 'boost', idempotencyKey: attemptKey.current }),
       })
       const order = (await res.json()) as {
         error?: string
@@ -143,6 +148,7 @@ export function BoostCard({
         prefill?: { name?: string; email?: string; contact?: string }
       }
       if (!res.ok || !order.orderId || !order.keyId) {
+        attemptKey.current = null
         setError(order.error ?? 'Could not start the boost purchase. Please try again.')
         setBuying(false)
         return
@@ -162,7 +168,12 @@ export function BoostCard({
         description: order.itemName ?? 'Profile Boost',
         prefill: order.prefill,
         theme: { color: '#8a1122' },
-        modal: { ondismiss: () => setBuying(false) },
+        modal: {
+          ondismiss: () => {
+            setBuying(false)
+            setMessage('Checkout closed. Refresh later if Razorpay is still processing the payment.')
+          },
+        },
         handler: async (payload: {
           razorpay_order_id: string
           razorpay_payment_id: string
@@ -174,16 +185,24 @@ export function BoostCard({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload),
             })
-            const vBody = (await v.json().catch(() => ({}))) as { error?: string }
-            if (!v.ok) {
-              setError(vBody.error ?? 'Payment verified, but activation failed. Please contact support.')
+            const vBody = (await v.json().catch(() => ({}))) as { error?: string; status?: string }
+            if (vBody.status === 'pending') {
+              setBuying(false)
+              setMessage('Payment is authorized and awaiting capture. The boost will activate after Razorpay confirms it.')
               return
             }
+            if (!v.ok) {
+              setBuying(false)
+              setError(vBody.error ?? 'Payment was captured, but boost activation is pending. Please refresh shortly.')
+              return
+            }
+            attemptKey.current = null
             setBuying(false)
             setActive(true)
             setMessage('Boost activated — your profile appears first in search while it lasts.')
             router.refresh()
           } catch {
+            setBuying(false)
             setError('Could not confirm the payment. It will activate automatically if captured.')
           }
         },

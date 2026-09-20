@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Crown, Loader2, Lock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -59,11 +59,7 @@ export function PurchaseButton({
   const router = useRouter()
   const [state, setState] = useState<'idle' | 'loading' | 'verifying'>('idle')
   const [error, setError] = useState<string | null>(null)
-
-  // In case an order completes while we were away (?payment=success|cancelled).
-  useEffect(() => {
-    // Nothing to do on mount — the packages page shows the banners.
-  }, [])
+  const attemptKey = useRef<string | null>(null)
 
   async function buy() {
     setError(null)
@@ -83,11 +79,15 @@ export function PurchaseButton({
     }
 
     setState('loading')
+    attemptKey.current ??= crypto.randomUUID()
     try {
       const res = await fetch('/api/payments/order', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ packageId, packageSlug }),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': attemptKey.current,
+        },
+        body: JSON.stringify({ packageId, packageSlug, idempotencyKey: attemptKey.current }),
       })
       const order = (await res.json()) as {
         error?: string
@@ -99,6 +99,7 @@ export function PurchaseButton({
         prefill?: { name?: string; email?: string; contact?: string }
       }
       if (!res.ok || !order.orderId || !order.keyId) {
+        attemptKey.current = null
         setError(order.error ?? 'Could not start the payment. Please try again.')
         setState('idle')
         return
@@ -133,15 +134,22 @@ export function PurchaseButton({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(response),
             })
-            if (verifyRes.ok) {
+            const body = (await verifyRes.json().catch(() => ({}))) as {
+              error?: string
+              status?: string
+            }
+            if (verifyRes.ok && body.status !== 'pending') {
+              attemptKey.current = null
               if (next) {
                 router.push(next)
               } else {
                 router.push('/packages?payment=success')
               }
               router.refresh()
+            } else if (body.status === 'pending') {
+              setError('Payment is authorized and awaiting capture. Your membership will appear after Razorpay confirms it.')
+              setState('idle')
             } else {
-              const body = (await verifyRes.json()) as { error?: string }
               setError(body.error ?? 'Verification failed. Contact support if you were charged.')
               setState('idle')
             }
