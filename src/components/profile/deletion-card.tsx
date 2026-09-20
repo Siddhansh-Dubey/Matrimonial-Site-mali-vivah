@@ -74,10 +74,10 @@ export function DeletionCard() {
               <AlertTriangle className="h-3.5 w-3.5" aria-hidden /> This cannot be undone
             </p>
             <ul className="mt-1.5 list-disc space-y-0.5 pl-4 text-stone-600">
-              <li>Your login, profile and partner preferences are removed.</li>
-              <li>All uploaded photos (profile, family, moments) are erased.</li>
-              <li>Interests, matches, blocks, reports you filed and history are deleted.</li>
+              <li>Your login, profile, photos and partner preferences are removed.</li>
+              <li>Interests, matches, messages, blocks and notifications are deleted.</li>
               <li>Paid time left on a package is forfeited — refunds go through support.</li>
+              <li>Payment records are kept in anonymised form for accounts; they are no longer linked to you.</li>
             </ul>
           </div>
           <input

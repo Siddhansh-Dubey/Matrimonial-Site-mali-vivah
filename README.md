@@ -63,9 +63,10 @@ SQL Editor → test register/login.
   free → approved/hidden, lapsed → expired, draft → draft) — never a paid
   state without a payment. See `supabase/README.md` → "Admin member
   management".
-- **Account deletion is self-serve and immediate** — no request queue: the
-  member's profile page wipes the auth user, every cascading row and all
-  uploaded photos in one shot (`src/app/profile/actions.ts`).
+- **Account deletion is self-serve and immediate** — the profile is hidden
+  first (`delete_my_account()`), then photos are wiped and the auth user is
+  removed. Payments / reports are retained in anonymised form. See
+  `supabase/README.md` → "Personal-data lifecycle".
 
 ## Promoting the first admin
 

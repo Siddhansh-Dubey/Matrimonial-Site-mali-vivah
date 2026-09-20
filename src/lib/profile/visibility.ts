@@ -112,14 +112,6 @@ export async function getProfileVisibility(
       } catch {
         phone = null
       }
-      if (!phone) {
-        try {
-          const { data } = await supabase.from('profiles').select('mobile').eq('id', targetId).maybeSingle()
-          phone = ((data as { mobile?: string | null } | null)?.mobile ?? null) as string | null
-        } catch {
-          phone = null
-        }
-      }
     }
   }
 
