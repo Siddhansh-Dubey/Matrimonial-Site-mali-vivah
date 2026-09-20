@@ -1686,6 +1686,7 @@ export type Database = {
         Returns: Json
       }
       get_public_profile: { Args: { p_user_id: string }; Returns: Json }
+      get_profile_compatibility: { Args: { p_target_id: string }; Returns: Json }
       has_active_subscription: { Args: { p_user_id?: string | null }; Returns: boolean }
       has_live_membership: { Args: { p_user_id: string }; Returns: boolean }
       is_profile_public: { Args: { p_user_id: string }; Returns: boolean }

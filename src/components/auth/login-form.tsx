@@ -8,6 +8,7 @@ import { useI18n } from '@/lib/i18n/provider'
 import { isSupabaseConfigured } from '@/lib/env'
 import { lastTenDigits, loginSchema } from '@/lib/auth/login-schema'
 import { signInWithMobile } from '@/app/login/actions'
+import { getSafeRedirect } from '@/lib/navigation'
 
 /** Where "remember me" keeps the identifier the member actually used. */
 const REMEMBER_KEY = 'mali-vivah:remember-identifier'
@@ -17,15 +18,6 @@ const LEGACY_REMEMBER_KEY = 'mali-vivah:remember-email'
 type FieldErrors = {
   identifier?: string
   password?: string
-}
-
-function getSafeRedirect(candidate?: string | null): string {
-  if (!candidate) return '/profile'
-  const trimmed = candidate.trim()
-  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.includes('\\')) {
-    return trimmed
-  }
-  return '/profile'
 }
 
 /**

@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
 import { fallbackPackages, getActiveSubscription } from '@/lib/profile/subscription'
 import { PurchaseButton } from '@/components/profile/purchase-button'
+import { getSafeRedirect } from '@/lib/navigation'
 import type { PackageRow } from '@/lib/supabase/database.types'
 
 export const metadata: Metadata = { title: 'Packages' }
@@ -19,6 +20,8 @@ export default async function PackagesPage({
   const {
     data: { user },
   } = supabase ? await supabase.auth.getUser() : { data: { user: null } }
+
+  const safeNext = searchParams?.next ? getSafeRedirect(searchParams.next, '') : ''
 
   // Live packages from the DB, with a static fallback when the table is missing.
   let packages: PackageRow[] = []
@@ -61,22 +64,23 @@ export default async function PackagesPage({
             <div className="flex items-start gap-3">
               <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
               <span>
-                <span className="font-bold">Payment successful.</span> Your membership is now active
-                and your profile is being published in Brides &amp; Grooms. If your profile is not
-                live within a minute, open <Link href="/profile/edit" className="font-semibold underline underline-offset-2">your profile</Link>{' '}
-                and complete any missing details.
+                <span className="font-bold">Payment received.</span> {subscription ? (
+                  <>Your membership is now active and your profile is being published in Brides &amp; Grooms. If your profile is not live within a minute, open <Link href="/profile/edit" className="font-semibold underline underline-offset-2">your profile</Link> and complete any missing details.</>
+                ) : (
+                  <>Your payment confirmation is being processed. Refresh this page in a moment to view your active membership.</>
+                )}
               </span>
             </div>
-            {searchParams?.next && (
+            {safeNext ? (
               <div className="mt-4 border-t border-emerald-200/60 pt-3">
                 <Link
-                  href={searchParams.next}
+                  href={safeNext}
                   className="btn-primary inline-flex items-center gap-2 text-xs py-2 px-4"
                 >
-                  Continue to Success Story Submission &rarr;
+                  Continue &rarr;
                 </Link>
               </div>
-            )}
+            ) : null}
           </div>
         )}
         {searchParams?.payment === 'pending' && (
@@ -92,7 +96,7 @@ export default async function PackagesPage({
           </div>
         )}
 
-        {(searchParams?.reason === 'stories' || searchParams?.next?.includes('success-stories')) && !subscription && (
+        {(searchParams?.reason === 'stories' || safeNext.includes('success-stories')) && !subscription && (
           <div className="mx-auto mt-8 flex max-w-2xl items-start gap-3 rounded-2xl border border-gold-400/50 bg-amber-50/80 px-5 py-4 text-sm text-maroon shadow-sm">
             <Heart className="mt-0.5 h-5 w-5 shrink-0 text-maroon fill-gold-300" />
             <div>
@@ -121,16 +125,16 @@ export default async function PackagesPage({
                 profile details are unlocked for you.
               </span>
             </div>
-            {searchParams?.next && (
+            {safeNext ? (
               <div className="mt-4 border-t border-emerald-200/60 pt-3">
                 <Link
-                  href={searchParams.next}
+                  href={safeNext}
                   className="btn-primary inline-flex items-center gap-2 text-xs py-2 px-4"
                 >
-                  Continue to Success Story Submission &rarr;
+                  Continue &rarr;
                 </Link>
               </div>
-            )}
+            ) : null}
           </div>
         ) : user ? (
           <div className="mx-auto mt-8 flex max-w-2xl items-start gap-3 rounded-2xl border border-gold-400/50 bg-gold-100/50 px-5 py-4 text-sm text-maroon-deep">
@@ -143,14 +147,14 @@ export default async function PackagesPage({
         ) : (
           <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-stone-200 bg-white/70 px-5 py-4 text-center text-sm text-stone-600">
             <Link
-              href={searchParams?.next ? `/login?next=${encodeURIComponent(searchParams.next)}` : '/login'}
+              href={safeNext ? `/login?next=${encodeURIComponent(safeNext)}` : '/login'}
               className="font-semibold text-maroon underline underline-offset-2"
             >
               Log in
             </Link>{' '}
             to purchase a package, or{' '}
             <Link
-              href={searchParams?.next ? `/register?next=${encodeURIComponent(searchParams.next)}` : '/register'}
+              href={safeNext ? `/register?next=${encodeURIComponent(safeNext)}` : '/register'}
               className="font-semibold text-maroon underline underline-offset-2"
             >
               register free
@@ -207,11 +211,11 @@ export default async function PackagesPage({
                       priceInr={pkg.price_inr}
                       featured={featured}
                       hasActive={Boolean(subscription)}
-                      next={searchParams?.next}
+                      next={safeNext || undefined}
                     />
                   ) : (
                     <Link
-                      href={searchParams?.next ? `/login?next=${encodeURIComponent(searchParams.next)}` : '/login'}
+                      href={safeNext ? `/login?next=${encodeURIComponent(safeNext)}` : '/login'}
                       className={
                         featured
                           ? 'inline-flex w-full items-center justify-center rounded-full bg-gold-400 px-6 py-2.5 text-sm font-bold text-maroon-deep hover:bg-gold-300'

@@ -50,11 +50,15 @@ export async function audit(
   targetId: string | null,
   details: Record<string, unknown> = {}
 ): Promise<void> {
-  await ctx.admin.from('admin_audit_log').insert({
+  const { error } = await ctx.admin.from('admin_audit_log').insert({
     admin_id: ctx.userId,
     action,
     target_type: targetType,
     target_id: targetId,
     details: details as Json,
   })
+  if (error) {
+    console.error(`[ADMIN_AUDIT_FAILURE] Action "${action}" failed to record in admin_audit_log:`, error.message)
+    throw new Error(`Admin audit record failed: ${error.message}`)
+  }
 }
