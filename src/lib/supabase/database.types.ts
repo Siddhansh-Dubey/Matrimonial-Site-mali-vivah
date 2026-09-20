@@ -1738,7 +1738,7 @@ export type Database = {
         Returns: Json
       }
       request_mobile_otp: { Args: Record<string, never>; Returns: Json }
-      complete_mobile_otp_verification: { Args: Record<string, never>; Returns: Json }
+      complete_mobile_otp_verification: { Args: { p_user_id: string; p_mobile: string }; Returns: Json }
       report_moment: {
         Args: {
           p_moment_id: string

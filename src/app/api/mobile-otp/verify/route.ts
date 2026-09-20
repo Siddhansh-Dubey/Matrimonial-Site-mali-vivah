@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic'
  *
  * The code is validated by Supabase (GoTrue verifyOtp with the service key)
  * — never by this app. Only after Supabase confirms the code does the
- * member-context RPC complete_mobile_otp_verification() flip
+ * service-only RPC complete_mobile_otp_verification(user, mobile) flip
  * profiles.mobile_verified. There is no path to mark a number verified
  * without a real, provider-delivered OTP.
  *
@@ -55,14 +55,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'No valid mobile number on file.' }, { status: 400 })
   }
 
-  let verified: { user?: { id: string; email?: string | null } | null } = {}
+  let verified: { user?: { id: string; email?: string | null; phone?: string } | null } = {}
   try {
     const { data, error } = await admin.auth.verifyOtp({
       phone: `+91${mobile}`,
       token: otp,
       type: 'sms',
     })
-    if (error || !data?.user) {
+    if (error || !data?.user || data.user.phone?.replace(/\D/g, '') !== `91${mobile}`) {
       // Wrong / expired / already-used code — one generic message, nothing
       // that reveals which attempt failed.
       return NextResponse.json(
@@ -78,9 +78,13 @@ export async function POST(req: Request) {
     )
   }
 
-  // Flip the authoritative verified flag (member context — the RPC checks
-  // auth.uid(), pushes the notification and writes the activity event).
-  const { error: completeError } = await supabase.rpc('complete_mobile_otp_verification')
+  // A fresh service client is required: verifyOtp can replace the auth
+  // session on its client with the phone identity. Never expose completion
+  // to a member JWT, and bind the original member to the number just proved.
+  const { error: completeError } = await createAdminClient().rpc('complete_mobile_otp_verification', {
+    p_user_id: user.id,
+    p_mobile: mobile,
+  })
   if (completeError) {
     return NextResponse.json(
       { error: 'The code was valid, but saving the verification failed. Please try again.' },
@@ -92,7 +96,7 @@ export async function POST(req: Request) {
   // created one. A real Mali Vivah account always has an email, so a
   // null-email user is by definition not a member account.
   const phoneUser = verified.user
-  if (phoneUser && phoneUser.email == null && phoneUser.id !== user.id) {
+  if (phoneUser && !phoneUser.email && phoneUser.id !== user.id) {
     try {
       await admin.auth.admin.deleteUser(phoneUser.id)
     } catch {
