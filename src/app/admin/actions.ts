@@ -221,6 +221,15 @@ export async function setFeatured(formData: FormData) {
   const targetUserId = requireUuid(str(formData, 'user_id'))
   const feature = str(formData, 'feature') === 'true'
   const position = Number(str(formData, 'position') || '0')
+  // Position is the homepage ordering key (featured_profiles.position,
+  // SMALLINT). Validated server-side so a tampered form can never write a
+  // NaN / fractional / negative / out-of-range value. Equal positions are a
+  // legitimate state — the Members page features everyone at the default
+  // 100 — and stay deterministic: get_featured_profiles() tie-breaks by
+  // created_at, then profile_id.
+  if (!Number.isInteger(position) || position < 0 || position > 32767) {
+    throw new Error('Invalid position — use a whole number between 0 and 32767')
+  }
   const { admin } = ctx
   await memberAction(formData, targetUserId, async () => {
     if (feature) {

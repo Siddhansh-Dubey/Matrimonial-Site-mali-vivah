@@ -1,4 +1,4 @@
-import { Activity, BadgeCheck, Banknote, FileWarning, Flame, Heart, Rocket, ShieldBan, Users } from 'lucide-react'
+import { Activity, BadgeCheck, Banknote, FileWarning, Flame, Heart, Rocket, Users } from 'lucide-react'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { requireAdminPage } from '@/lib/admin/server'
 
@@ -63,7 +63,7 @@ export default async function AdminDashboard() {
     { label: 'Open reports', value: openReports, icon: FileWarning, href: '/admin/reports' },
     { label: 'Pending verifications', value: pendingVerifications, icon: BadgeCheck, href: '/admin/verification' },
     { label: 'Live moments', value: liveMoments, icon: Flame, href: '/admin/moments' },
-    { label: 'Active boosts', value: activeBoosts, icon: ShieldBan, href: '/admin/featured' },
+    { label: 'Active boosts', value: activeBoosts, icon: Rocket, href: '/admin/boosts' },
   ]
 
   return (
