@@ -111,3 +111,13 @@ boundaries are the real ones.
   under stacking, refund safety + idempotency (cases A–E), expiry wording, no
   hard-coded 7 days, RLS/grants, account-deletion cascade, and the legacy
   backfill of migration 25 on a pre-existing database.
+
+## Phase 1 acceptance audit (Step 13)
+
+See **[the requirement-by-requirement audit](docs/audits/step13-phase1-audit.md)**
+and **[migration/test evidence](docs/audits/step13-evidence.md)**. This is not
+production sign-off: it documents remaining media/privacy, notification,
+configuration and external-testing gaps. Migration
+`20260920160000_audit_authorization_boundaries.sql` and the corresponding OTP
+route must deploy together; they close confirmed direct-write authorization
+defects without adding packages/offers or changing prices.

@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Thirty-six migrations, run in filename order:
+Thirty-seven migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -204,6 +204,14 @@ operator-managed content, safety + analytics — run after 1–17):
     activity idempotency, a server-only webhook replay ledger, locked and
     idempotent membership/boost activation, exact-payment refunds and stale
     account protections. See "Payment & membership lifecycle" below.
+
+37. `20260920160000_audit_authorization_boundaries.sql` — **Step 13 critical
+    authorization corrections.** Interest updates are status-only; mobile OTP
+    completion is service-only and bound to the original member/mobile; direct
+    member writes cannot clear moderation/retirement state or forge protected
+    fields on INSERT. Apply before/with the updated OTP verify route. See the
+    [Phase 1 audit](../docs/audits/step13-phase1-audit.md) for open findings and
+    [evidence](../docs/audits/step13-evidence.md) for migration/test limitations.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's
