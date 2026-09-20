@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Crown, Loader2, Lock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { isSupabaseConfigured } from '@/lib/env'
+import { getSafeRedirect } from '@/lib/navigation'
 
 /**
  * Real Razorpay Standard Checkout.
@@ -138,17 +139,17 @@ export function PurchaseButton({
               error?: string
               status?: string
             }
-            if (verifyRes.ok && body.status !== 'pending') {
+            const isPending = verifyRes.status === 202 || body.status === 'pending'
+            if (verifyRes.ok && !isPending) {
               attemptKey.current = null
-              if (next) {
-                router.push(next)
-              } else {
-                router.push('/packages?payment=success')
-              }
+              const dest = next ? getSafeRedirect(next, '/packages?payment=success') : '/packages?payment=success'
+              router.push(dest)
               router.refresh()
-            } else if (body.status === 'pending') {
-              setError('Payment is authorized and awaiting capture. Your membership will appear after Razorpay confirms it.')
+            } else if (isPending) {
+              setError('Payment is authorized and awaiting capture. Your membership will activate after Razorpay confirms it. Please refresh this page shortly.')
               setState('idle')
+              router.push('/packages?payment=pending')
+              router.refresh()
             } else {
               setError(body.error ?? 'Verification failed. Contact support if you were charged.')
               setState('idle')

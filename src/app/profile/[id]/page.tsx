@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   BadgeCheck,
   Briefcase,
+  Check,
   Download,
   GraduationCap,
   Heart,
@@ -13,6 +14,7 @@ import {
   MapPin,
   MessageCircle,
   Phone,
+  Sparkles,
   User as UserIcon,
   Users,
 } from 'lucide-react'
@@ -58,6 +60,12 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
         phone: null,
       }
   const { isPaid, mutual, canSeeDetails, canSeePhone, phone } = visibility
+
+  // Individual profile compatibility (server-authoritative rule-based matching)
+  const { data: compatData } = user && user.id !== params.id
+    ? await supabase.rpc('get_profile_compatibility', { p_target_id: params.id })
+    : { data: null }
+  const compatibility = compatData as { score?: number | null; reasons?: string[] } | null
 
   // Chat follows the same gates as the phone reveal: a paid viewer AND a
   // mutual match. Payment alone never opens a conversation, and a free viewer
@@ -202,6 +210,35 @@ export default async function PublicProfilePage({ params }: { params: { id: stri
                 {canSeeDetails ? (profile.sub_community ?? profile.community ?? 'Member') : (profile.community ?? 'Member')}
               </span>
             </div>
+
+            {compatibility?.score != null && (
+              <div className="mt-5 rounded-2xl border border-gold-300/80 bg-gradient-to-r from-amber-50/90 to-orange-50/50 p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-gold-600" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-maroon">
+                      Match Compatibility
+                    </span>
+                  </div>
+                  <span className="font-display text-lg font-bold text-maroon">
+                    {compatibility.score}%
+                  </span>
+                </div>
+                {compatibility.reasons && compatibility.reasons.length > 0 && (
+                  <ul className="mt-2.5 flex flex-wrap gap-1.5">
+                    {compatibility.reasons.map((reason) => (
+                      <li
+                        key={reason}
+                        className="inline-flex items-center gap-1 rounded-full bg-white/90 px-2.5 py-0.5 text-[11px] font-medium text-stone-700 shadow-xs ring-1 ring-gold-200"
+                      >
+                        <Check className="h-3 w-3 text-emerald-600" />
+                        {reason}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
 
             {canSeeDetails ? (
               <dl className="mt-6 space-y-3 text-sm">

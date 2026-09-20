@@ -44,6 +44,7 @@ export function MomentsRail() {
   const [reportBusy, setReportBusy] = useState(false)
   const [reportError, setReportError] = useState<string | null>(null)
   const [reportDone, setReportDone] = useState<'filed' | 'duplicate' | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const railRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback(async () => {
@@ -297,13 +298,36 @@ export function MomentsRail() {
 
               <div className="mt-3 flex items-center gap-4">
                 {viewer.is_mine ? (
-                  <button
-                    type="button"
-                    onClick={() => removeMoment(viewer)}
-                    className="text-xs font-semibold text-brand-700 hover:underline"
-                  >
-                    Delete this moment
-                  </button>
+                  confirmDelete ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-brand-700">Delete this moment?</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfirmDelete(false)
+                          removeMoment(viewer)
+                        }}
+                        className="rounded bg-brand-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-brand-800"
+                      >
+                        Yes, delete
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDelete(false)}
+                        className="text-xs text-stone-500 hover:underline"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(true)}
+                      className="text-xs font-semibold text-brand-700 hover:underline"
+                    >
+                      Delete this moment
+                    </button>
+                  )
                 ) : (
                   <button
                     type="button"
@@ -400,6 +424,8 @@ function MomentsHeader({
 }) {
   const [caption, setCaption] = useState('')
   const [open, setOpen] = useState(false)
+  const [agreed, setAgreed] = useState(false)
+  const [warnAgreed, setWarnAgreed] = useState(false)
 
   if (!isSupabaseConfigured) return null
 
@@ -414,44 +440,83 @@ function MomentsHeader({
         </h2>
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => {
+            setOpen((v) => !v)
+            setWarnAgreed(false)
+          }}
           className="btn-secondary !py-2 text-xs"
         >
           <Plus className="h-4 w-4" /> Post a moment
         </button>
       </div>
       {open && (
-        <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-4 sm:flex-row sm:items-center">
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-maroon px-4 py-2 text-xs font-bold text-white hover:bg-maroon-dark">
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-            Choose photo or video
-            <input
-              type="file"
-              accept="image/*,video/*"
-              className="sr-only"
-              disabled={busy}
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) {
-                  onPost(f, caption)
-                  setOpen(false)
+        <div className="mt-3 flex flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <label
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-xs font-bold text-white transition-colors ${
+                agreed && !busy
+                  ? 'cursor-pointer bg-maroon hover:bg-maroon-dark'
+                  : 'cursor-not-allowed bg-stone-300'
+              }`}
+              onClick={(e) => {
+                if (!agreed) {
+                  e.preventDefault()
+                  setWarnAgreed(true)
                 }
-                e.target.value = ''
               }}
-            />
-          </label>
-          <div className="flex-1">
-            <input
-              value={caption}
-              onChange={(e) => setCaption(e.target.value)}
-              placeholder="Add a caption (optional)"
-              maxLength={200}
-              className="input w-full !py-2 text-sm"
-            />
-            <p className="mt-1.5 text-[10px] text-stone-400">
-              Photos up to 10 MB · videos up to 50 MB · expires automatically after 24 hours
-            </p>
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+              Choose photo or video
+              <input
+                type="file"
+                accept="image/*,video/*"
+                className="sr-only"
+                disabled={busy || !agreed}
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f && agreed) {
+                    onPost(f, caption)
+                    setOpen(false)
+                    setAgreed(false)
+                    setCaption('')
+                  }
+                  e.target.value = ''
+                }}
+              />
+            </label>
+            <div className="flex-1">
+              <input
+                value={caption}
+                onChange={(e) => setCaption(e.target.value)}
+                placeholder="Add a caption (optional)"
+                maxLength={200}
+                className="input w-full !py-2 text-sm"
+              />
+              <p className="mt-1.5 text-[10px] text-stone-400">
+                Photos up to 10 MB · videos up to 50 MB · expires automatically after 24 hours
+              </p>
+            </div>
           </div>
+          <div className="flex items-center gap-2 border-t border-stone-100 pt-3">
+            <input
+              id="moment-guidelines"
+              type="checkbox"
+              checked={agreed}
+              onChange={(e) => {
+                setAgreed(e.target.checked)
+                if (e.target.checked) setWarnAgreed(false)
+              }}
+              className="h-4 w-4 rounded border-stone-300 text-maroon focus:ring-maroon"
+            />
+            <label htmlFor="moment-guidelines" className="cursor-pointer text-xs text-stone-600">
+              I confirm this media belongs to me and complies with community decency guidelines.
+            </label>
+          </div>
+          {warnAgreed && !agreed && (
+            <p className="text-xs font-semibold text-brand-700">
+              Please check the confirmation box above before uploading.
+            </p>
+          )}
         </div>
       )}
       {error && <p className="mt-2 text-xs font-semibold text-brand-700">{error}</p>}
