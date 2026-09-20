@@ -81,6 +81,9 @@ export default async function AdminFeaturedPage() {
                 <input
                   name="position"
                   type="number"
+                  min={0}
+                  max={32767}
+                  step={1}
                   defaultValue={r.position}
                   className="w-20 rounded-full border border-stone-300 px-3 py-1.5 text-sm"
                   aria-label="Position"

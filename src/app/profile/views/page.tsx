@@ -77,8 +77,8 @@ export default async function ProfileViewsPage() {
           </div>
         ) : views.length === 0 ? (
           <div className="mx-auto mt-10 max-w-2xl rounded-2xl border border-stone-200 bg-white/70 px-6 py-10 text-center text-sm text-stone-600">
-            Nobody has viewed your profile yet. Boost it to appear first in search — it usually
-            triples your views.
+            Nobody has viewed your profile yet. Boost your profile to increase its visibility in
+            search.
           </div>
         ) : (
           <ul className="mx-auto mt-10 max-w-2xl divide-y divide-stone-100 rounded-[26px] bg-white shadow-card-float ring-1 ring-stone-100">

@@ -165,6 +165,15 @@ operator-managed content, safety + analytics — run after 1–17):
     removed) and `admin_list_members` (server-side filters + paging). Every
     state change writes one `admin_audit_log` row (internal reason) and one
     scrubbed `activity_events` row. See "Admin member management" below.
+32. `20260920000000_featured_boost_ordering.sql` — **Featured/boost exposure
+    ordering (Step 8).** `get_featured_profiles()` v2 and `search_matches()`
+    v5.1: identical signatures and gates, deterministic total order. Featured
+    cards sort by admin `position` ASC, then `created_at` ASC, then
+    `profile_id` ASC (equal positions — e.g. two members featured from the
+    Members list at the default 100 — never shuffle). Search keeps its
+    existing boost-first rule (`boosted DESC, updated_at DESC`) and gains
+    `user_id ASC` as the final tie-breaker. Boost still affects ORDER only,
+    never visibility. See "Featured profiles & boosted exposure" below.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's
@@ -566,6 +575,45 @@ Activity events written for admins (`admin_member_*`,
 `admin_manual_membership_activation`) carry state facts only — members can
 read their own activity stream, so reasons, notes and admin ids live in
 `admin_audit_log` (service role only).
+
+## Featured profiles & boosted exposure (migration 32)
+
+**Featured** and **boosted** are different things and stay different:
+
+* **Featured** = admin-curated homepage placement (`featured_profiles`:
+  `profile_id`, `position`, `created_by`). It does **not** mean paid,
+  verified or boosted by itself. Only the admin panel writes the table
+  (service role; no INSERT/UPDATE/DELETE policy exists for clients), the
+  `setFeatured` action re-validates the position server-side (whole number
+  0–32767) and refuses to newly feature a profile that is not public right
+  now.
+* **Boosted** = temporary search-exposure boost (the `profile_boost_config` /
+  `profile_boosts` / `profile_boost_entitlements` model above). It never
+  inserts a member into the homepage Featured section and never reorders it.
+
+**Ordering (deterministic in both directions):**
+
+* `get_featured_profiles()` v2 — `position ASC → created_at ASC →
+  profile_id ASC`. The admin position is authoritative (lower shows first);
+  the two tie-breakers only make equal positions deterministic. The homepage
+  renders this order untouched — boost status is a display badge, never a
+  ranking input.
+* `search_matches()` v5.1 — `boosted DESC → updated_at DESC → user_id ASC`.
+  Boost ranks the profile first in Search/Brides/Grooms; the trailing
+  `user_id` tie-breaker removes the last source of non-determinism. Daily 5
+  keeps its own semantics (score first; boost only breaks ties between equal
+  scores).
+
+**Visibility never bends to exposure:** both functions — and Daily 5 — keep
+gating every row on `is_profile_public()` + `is_blocked()`. A profile that is
+admin-hidden, suspended, expired, incomplete, or without a live membership is
+skipped even while featured and/or boosted; no manual un-feature is needed
+when a profile later becomes ineligible. Boost changes ORDER only — it can
+never bypass gender/age/city/community/lifestyle filters, the
+`advanced_search` plan gate, block rules or the compatibility threshold, and
+boosted state is always computed server-side by `has_active_boost()`
+(`expires_at > now()` — a lapsed boost is not active even before the sweep
+runs).
 
 ## Useful admin queries (matchmaking)
 

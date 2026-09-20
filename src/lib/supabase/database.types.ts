@@ -21,6 +21,7 @@
  * - 20260917000000_notification_enum_message_received.sql (notification_type += message_received)
  * - 20260917010000_chat.sql                   (conversations, conversation_members, messages + chat RPCs)
  * - 20260919120000_admin_member_management.sql (admin hold / suspension columns, admin_* member RPCs)
+ * - 20260920000000_featured_boost_ordering.sql (deterministic featured + boost-first search ordering)
  *
  * If you change the SQL, update this file to match.
  */
