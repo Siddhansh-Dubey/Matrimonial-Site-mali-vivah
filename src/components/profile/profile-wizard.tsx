@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { FormEvent, useEffect, useState } from 'react'
+import { FormEvent, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft,
   ArrowRight,
@@ -59,6 +59,7 @@ import type {
   MaritalStatus,
   MatrimonyProfile,
   PartnerPreferences,
+  PlatinumLaunchState,
 } from '@/lib/supabase/database.types'
 
 const STEPS = ['basic', 'education', 'about', 'family', 'preferences', 'photos'] as const
@@ -153,6 +154,11 @@ export function ProfileWizard() {
   const [errors, setErrors] = useState<Errors>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  // Platinum Launch Offer — the server-authoritative claim result, if the
+  // save just completed the profile (first-100 grant or 24h demo). The
+  // browser never decides eligibility: claim_platinum_launch_offer() does.
+  const [launchOffer, setLaunchOffer] = useState<PlatinumLaunchState | null>(null)
+  const launchRef = useRef<PlatinumLaunchState | null>(null)
   const [resumed, setResumed] = useState(false)
   const [completedSteps, setCompletedSteps] = useState<Step[]>([])
 
@@ -458,6 +464,26 @@ export function ProfileWizard() {
       setFormError(ppError.message)
       return false
     }
+
+    // Platinum Launch Offer: after the profile save succeeded, let the SERVER
+    // decide whether this member just became eligible (required details
+    // complete → first-100 30-day grant or 24-hour demo). The RPC is atomic
+    // and idempotent — repeated saves, refreshes or double clicks return the
+    // existing grant and can never duplicate it. Any failure here (e.g. the
+    // migration is not applied yet) is non-fatal: the dashboard retries the
+    // same RPC lazily, exactly like sweep_my_membership.
+    try {
+      const { data: launchData } = await supabase.rpc('claim_platinum_launch_offer')
+      const launch = (launchData ?? null) as PlatinumLaunchState | null
+      // Remember ONLY a freshly issued grant: a later save/publish in the same
+      // session returns 'already_claimed' and must not erase the celebration.
+      if (launch && launch.status === 'granted') {
+        launchRef.current = launch
+        setLaunchOffer(launch)
+      }
+    } catch {
+      // Promotion must never break the save flow.
+    }
     return true
   }
 
@@ -616,7 +642,14 @@ export function ProfileWizard() {
     setSaving(false)
     if (ok) {
       if (userId) saveProgress(userId, { completed: [...STEPS], lastStep: 'photos' })
-      router.push('/profile?published=1')
+      // Carry the just-issued launch grant to the dashboard so it can
+      // celebrate truthfully (the card itself re-reads server state).
+      const launch = launchRef.current
+      const launchParam =
+        launch?.status === 'granted'
+          ? `&launch=${launch.grant_type === 'first_100' ? 'first100' : 'demo'}`
+          : ''
+      router.push(`/profile?published=1${launchParam}`)
       router.refresh()
     }
   }
@@ -1292,6 +1325,53 @@ export function ProfileWizard() {
               </div>
 
               <div className="rounded-xl bg-brand-50 px-4 py-3 text-sm text-brand-800">{t('profile.photos.reviewNote')}</div>
+            </div>
+          )}
+
+          {/* Platinum Launch Offer — server granted the promotion on save.
+              Shown for draft saves (a publish redirects to the dashboard,
+              which renders the full card). Never worded as a payment. */}
+          {launchOffer?.status === 'granted' && launchOffer.has_grant && (
+            <div
+              role="status"
+              className="mt-6 rounded-xl border border-gold-400/60 bg-gradient-to-br from-maroon-deep to-brand-800 px-4 py-4 text-sm text-white"
+            >
+              <p className="flex items-center gap-2 font-display text-base font-bold text-gold-200">
+                <Sparkles className="h-4 w-4" aria-hidden />
+                {launchOffer.grant_type === 'demo_24h'
+                  ? '🎉 Your free 24-hour Platinum demo is now active.'
+                  : launchOffer.slot_number
+                    ? `🎉 You're one of the first 100 members! (Slot #${launchOffer.slot_number})`
+                    : '🎉 You have received 30 days of Platinum access free.'}
+              </p>
+              <p className="mt-1.5 text-white/80">
+                {launchOffer.grant_type === 'demo_24h'
+                  ? 'Full Platinum capabilities for 24 hours — no payment needed.'
+                  : "You've received 30 days of Platinum access free — no payment needed."}
+                {launchOffer.expires_at ? (
+                  <>
+                    {' '}
+                    Active until{' '}
+                    <span className="font-semibold">
+                      {new Date(launchOffer.expires_at).toLocaleString('en-IN', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        timeZone: 'Asia/Kolkata',
+                      })}
+                    </span>
+                    .
+                  </>
+                ) : null}
+              </p>
+              <Link
+                href="/profile"
+                className="mt-3 inline-flex items-center gap-2 rounded-full bg-gold-400 px-4 py-1.5 text-xs font-bold text-maroon-deep hover:bg-gold-300"
+              >
+                <Star className="h-3.5 w-3.5" /> Go to my dashboard
+              </Link>
             </div>
           )}
 

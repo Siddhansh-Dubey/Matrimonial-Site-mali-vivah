@@ -1,9 +1,14 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { BadgeCheck, Check, Crown, Heart, Lock } from 'lucide-react'
+import { BadgeCheck, Check, Crown, Gift, Heart, Lock, Sparkles } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { isSupabaseConfigured } from '@/lib/env'
-import { fallbackPackages, getActiveSubscription } from '@/lib/profile/subscription'
+import {
+  fallbackPackages,
+  getActiveSubscription,
+  isPromotionalPlatinumSubscription,
+  promotionalPlatinumLabel,
+} from '@/lib/profile/subscription'
 import { PurchaseButton } from '@/components/profile/purchase-button'
 import { getSafeRedirect } from '@/lib/navigation'
 import type { PackageRow } from '@/lib/supabase/database.types'
@@ -108,7 +113,38 @@ export default async function PackagesPage({
           </div>
         )}
 
-        {user && subscription ? (
+        {user && subscription && isPromotionalPlatinumSubscription(subscription) ? (
+          <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-gold-400/60 bg-gradient-to-br from-maroon-deep to-brand-800 px-5 py-4 text-sm text-white shadow-card-float">
+            <div className="flex items-start gap-3">
+              <Crown className="mt-0.5 h-5 w-5 shrink-0 text-gold-300" aria-hidden />
+              <span>
+                <span className="font-display text-base font-bold text-gold-200">
+                  Platinum Launch Offer — free, active membership
+                </span>
+                <span className="mt-1 block text-white/85">
+                  You hold{' '}
+                  <span className="font-semibold">
+                    {promotionalPlatinumLabel(subscription.package_slug)}
+                  </span>{' '}
+                  until <span className="font-semibold">{formatDate(subscription.expires_at)}</span>.
+                  All profile details are unlocked for you. This is a promotional grant — you were
+                  not charged and no payment was created. When it ends your profile hides again
+                  unless you pick a paid package below.
+                </span>
+              </span>
+            </div>
+            {safeNext ? (
+              <div className="mt-4 border-t border-white/15 pt-3">
+                <Link
+                  href={safeNext}
+                  className="inline-flex items-center gap-2 rounded-full bg-gold-400 px-4 py-2 text-xs font-bold text-maroon-deep hover:bg-gold-300"
+                >
+                  Continue &rarr;
+                </Link>
+              </div>
+            ) : null}
+          </div>
+        ) : user && subscription ? (
           <div className="mx-auto mt-8 max-w-2xl rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900 shadow-sm">
             <div className="flex items-start gap-3">
               <BadgeCheck className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
@@ -162,6 +198,51 @@ export default async function PackagesPage({
             first.
           </div>
         )}
+
+        {/* Platinum Launch Offer — temporary launch promotion. FREE grants,
+            never a purchasable package and never worded as a payment. The
+            three paid packages below (and their prices) are unchanged. */}
+        <div className="mx-auto mt-10 max-w-5xl rounded-[26px] border border-gold-400/50 bg-gold-100/40 px-7 py-6 ring-1 ring-gold-300/40">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-maroon-deep text-gold-300">
+              <Crown className="h-5 w-5" aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-gold-700">
+                Limited-time launch promotion
+              </p>
+              <h2 className="mt-1 font-display text-2xl font-bold text-maroon">
+                Platinum Launch Offer — free, no payment needed
+              </h2>
+              <ul className="mt-3 grid gap-2.5 text-sm text-stone-700 sm:grid-cols-2">
+                <li className="flex items-start gap-2">
+                  <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-gold-600" aria-hidden />
+                  <span>
+                    <span className="font-bold text-maroon">First 100 members:</span> complete your
+                    profile and receive a <span className="font-semibold">free 30-day Platinum</span>{' '}
+                    membership — one per member, first come first served.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <Gift className="mt-0.5 h-4 w-4 shrink-0 text-gold-600" aria-hidden />
+                  <span>
+                    <span className="font-bold text-maroon">After the first 100:</span> complete your
+                    profile for a <span className="font-semibold">free 24-hour Platinum demo</span>{' '}
+                    — granted automatically, exactly once.
+                  </span>
+                </li>
+              </ul>
+              <p className="mt-3 text-xs text-stone-500">
+                Platinum is a promotional tier with full paid-member capabilities: public profile,
+                search &amp; recommendations, Express Interest, advanced filters, biodata download
+                on mutual match and more. It is granted free by the server when your required
+                profile details are complete — it is never sold and no payment is ever created for
+                it. Paid Smart / Premium / VIP memberships are unaffected: a promotional grant can
+                never shorten a paid plan.
+              </p>
+            </div>
+          </div>
+        </div>
 
         <ul className="mx-auto mt-10 grid max-w-5xl grid-cols-1 gap-6 md:grid-cols-3">
           {packages.map((pkg, i) => {

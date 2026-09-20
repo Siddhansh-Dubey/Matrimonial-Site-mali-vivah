@@ -24,6 +24,8 @@
  * - 20260920000000_featured_boost_ordering.sql (deterministic featured + boost-first search ordering)
  * - 20260920140000_privacy_account_lifecycle.sql (fail-safe deletion, payment/report retention, privacy RLS)
  * - 20260920150000_payment_membership_lifecycle_audit.sql (payment state machine, idempotency, webhook ledger, ownership constraints)
+ * - 20260920180000_enum_tier_platinum.sql       (membership_tier += promotional 'platinum')
+ * - 20260920190000_platinum_launch_offer.sql    (Platinum Launch Offer: campaign + claim ledger, atomic first-100 / 24h-demo grant RPCs, dev reset)
  *
  * If you change the SQL, update this file to match.
  */
@@ -1657,6 +1659,124 @@ export type Database = {
           },
         ]
       }
+      /**
+       * Platinum Launch Offer campaign state (migration 20260920190000).
+       * Service-role readable/writable only — members never see campaign rows
+       * (the member-facing RPCs expose only the caller's own entitlement).
+       */
+      platinum_launch_campaigns: {
+        Row: {
+          id: number
+          campaign_key: string
+          name: string
+          description: string
+          total_slots: number
+          enabled: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: never
+          campaign_key: string
+          name: string
+          description?: string
+          total_slots?: number
+          enabled?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: never
+          campaign_key?: string
+          name?: string
+          description?: string
+          total_slots?: number
+          enabled?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      /**
+       * Platinum Launch Offer claim/entitlement ledger — the authoritative
+       * first-100 counter. One row per member per campaign
+       * (UNIQUE(campaign_id, user_id)); written ONLY by
+       * claim_platinum_launch_offer(), removed ONLY by
+       * reset_platinum_launch_campaign() or account deletion (CASCADE).
+       */
+      platinum_launch_claims: {
+        Row: {
+          id: number
+          campaign_id: number
+          user_id: string
+          grant_type: 'first_100' | 'demo_24h'
+          slot_number: number | null
+          subscription_id: number | null
+          package_slug: string
+          source: 'launch_promotion'
+          promotion: 'first_100_platinum' | 'platinum_24h_demo'
+          granted_at: string
+          start_at: string
+          expiry_at: string
+          metadata: Json
+          created_at: string
+        }
+        Insert: {
+          id?: never
+          campaign_id: number
+          user_id: string
+          grant_type: 'first_100' | 'demo_24h'
+          slot_number?: number | null
+          subscription_id?: number | null
+          package_slug: string
+          source?: 'launch_promotion'
+          promotion: 'first_100_platinum' | 'platinum_24h_demo'
+          granted_at?: string
+          start_at: string
+          expiry_at: string
+          metadata?: Json
+          created_at?: string
+        }
+        Update: {
+          id?: never
+          campaign_id?: number
+          user_id?: string
+          grant_type?: 'first_100' | 'demo_24h'
+          slot_number?: number | null
+          subscription_id?: number | null
+          package_slug?: string
+          source?: 'launch_promotion'
+          promotion?: 'first_100_platinum' | 'platinum_24h_demo'
+          granted_at?: string
+          start_at?: string
+          expiry_at?: string
+          metadata?: Json
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'platinum_launch_claims_campaign_id_fkey'
+            columns: ['campaign_id']
+            isOneToOne: false
+            referencedRelation: 'platinum_launch_campaigns'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'platinum_launch_claims_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'platinum_launch_claims_subscription_id_fkey'
+            columns: ['subscription_id']
+            isOneToOne: false
+            referencedRelation: 'subscriptions'
+            referencedColumns: ['id']
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -1693,6 +1813,17 @@ export type Database = {
       profile_visibility_reason: { Args: { p_user_id?: string | null }; Returns: Json }
       sweep_my_membership: { Args: Record<string, never>; Returns: Json }
       sweep_expired_memberships: { Args: Record<string, never>; Returns: Json }
+      /**
+       * Platinum Launch Offer — the ONE atomic, idempotent grant path
+       * (authenticated; acts only on auth.uid()). Returns PlatinumLaunchState
+       * plus a `status` of 'granted' | 'already_claimed' | 'not_eligible' |
+       * 'campaign_disabled'.
+       */
+      claim_platinum_launch_offer: { Args: Record<string, never>; Returns: Json }
+      /** Read-only own Platinum Launch Offer state (never another member's). */
+      get_my_platinum_launch: { Args: Record<string, never>; Returns: Json }
+      /** DEVELOPMENT/ADMIN ONLY service-role reset back to 0/100 claimed. */
+      reset_platinum_launch_campaign: { Args: { p_confirm: string }; Returns: Json }
       mutual_interest_exists: { Args: { p_a: string; p_b: string }; Returns: boolean }
       get_profile_contact: { Args: { p_user_id: string }; Returns: string | null }
       free_benefits: { Args: Record<string, never>; Returns: Json }
@@ -1947,7 +2078,8 @@ export type Database = {
       moment_media_type: 'photo' | 'video'
       verification_type: 'mobile' | 'photo' | 'id_document'
       verification_status: 'pending' | 'verified' | 'rejected'
-      membership_tier: 'free' | 'smart' | 'premium' | 'vip'
+      /** 'platinum' is the promotional-only launch tier (never purchasable). */
+      membership_tier: 'free' | 'smart' | 'premium' | 'vip' | 'platinum'
       boost_status: 'active' | 'expired' | 'cancelled'
     }
     CompositeTypes: {
@@ -2137,6 +2269,41 @@ export type MembershipInfo = {
   days_left: number
   benefits: Record<string, boolean | number | null>
 }
+
+/**
+ * Output of get_my_platinum_launch() / claim_platinum_launch_offer().
+ * The member's Platinum Launch Offer state — promotional entitlement only;
+ * never a payment. `status` is present on the claim RPC's result:
+ *   granted          — a new 30-day first-100 grant or 24h demo was created
+ *   already_claimed  — the member's one launch grant already exists
+ *   not_eligible     — profile incomplete / admin-restricted / no profile
+ *   campaign_disabled— the promotion is switched off
+ */
+export type PlatinumLaunchState = {
+  has_grant: boolean
+  grant_type?: 'first_100' | 'demo_24h'
+  promotion?: 'first_100_platinum' | 'platinum_24h_demo'
+  /** The member's own launch slot (1..100) — first-100 grants only. */
+  slot_number?: number | null
+  package_slug?: string
+  subscription_id?: number | null
+  tier?: 'platinum'
+  granted_at?: string
+  started_at?: string
+  expires_at?: string
+  is_live?: boolean
+  seconds_left?: number
+  /** claim_platinum_launch_offer() only. */
+  status?: 'granted' | 'already_claimed' | 'not_eligible' | 'campaign_disabled'
+  reason?: 'account_inactive' | 'profile_missing' | 'admin_restricted' | 'profile_incomplete'
+  missing?: string[]
+  detail?: string
+  profile_status?: string
+  publish_note?: string | null
+}
+
+export type PlatinumLaunchCampaign = Database['public']['Tables']['platinum_launch_campaigns']['Row']
+export type PlatinumLaunchClaim = Database['public']['Tables']['platinum_launch_claims']['Row']
 
 /** A notification row in the bell dropdown. */
 export type NotificationItem = Pick<

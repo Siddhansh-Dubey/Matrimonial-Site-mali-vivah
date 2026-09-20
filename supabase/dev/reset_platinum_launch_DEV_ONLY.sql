@@ -1,0 +1,45 @@
+-- ============================================================================
+-- ############################################################################
+-- #  DEVELOPMENT ONLY — DO NOT RUN IN PRODUCTION                             #
+-- #                                                                          #
+-- #  Resets the Platinum Launch Offer (FIRST_100_PLATINUM) back to           #
+-- #  0 / 100 claimed slots so the promotion can be re-tested from scratch.   #
+-- #                                                                          #
+-- #  What it removes:                                                        #
+-- #    * platinum_launch_claims rows of this campaign (first-100 AND demo)   #
+-- #    * ONLY the promotional subscription rows those claims created         #
+-- #      (payment_id IS NULL + a promotional package slug — paid             #
+-- #      subscriptions can never match)                                      #
+-- #    * profiles that were 'active' ONLY through a promotional grant fall   #
+-- #      back to 'expired' (the same rule the membership sweeps apply)       #
+-- #                                                                          #
+-- #  What it NEVER touches:                                                  #
+-- #    * users / auth.users / profiles / matrimony_profiles rows (no data)   #
+-- #    * paid Smart / Premium / VIP subscriptions                            #
+-- #    * Razorpay payments, refunds, boosts, featured rows                   #
+-- #    * activity_events history (past grant events are retained)            #
+-- #    * campaign configuration (key, name, total_slots, enabled)            #
+-- #                                                                          #
+-- #  Run BEFORE go-live on a staging/dev project to guarantee production     #
+-- #  starts at 0/100 claimed. (A fresh production database is already at     #
+-- #  0/100 by construction — the counter is this campaign's own claim        #
+-- #  ledger and never counts users, so existing dev/test accounts cannot     #
+-- #  consume launch slots.)                                                  #
+-- ############################################################################
+--
+-- How to run: Supabase Dashboard → SQL Editor (the editor runs as the table
+-- owner and may execute the service-role RPC) → paste → Run.
+-- The RPC itself refuses without the typed confirmation string below and is
+-- not executable by anon/authenticated clients.
+-- ============================================================================
+
+SELECT public.reset_platinum_launch_campaign('FIRST_100_PLATINUM');
+
+-- Verify: claimed slots must read 0 and no promotional claims may remain.
+-- SELECT c.campaign_key,
+--        c.total_slots,
+--        count(cl.id) FILTER (WHERE cl.grant_type = 'first_100') AS claimed_first_100,
+--        count(cl.id) FILTER (WHERE cl.grant_type = 'demo_24h')  AS demos_granted
+-- FROM public.platinum_launch_campaigns c
+-- LEFT JOIN public.platinum_launch_claims cl ON cl.campaign_id = c.id
+-- GROUP BY c.id;

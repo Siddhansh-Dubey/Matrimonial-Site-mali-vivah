@@ -8,7 +8,8 @@
     "test": "node run.mjs",
     "test:boosts": "node run.mjs boosts",
     "test:profile-views": "node run.mjs profile-views",
-    "test:daily5": "node run.mjs daily5"
+    "test:daily5": "node run.mjs daily5",
+    "test:platinum-launch": "node run.mjs platinum-launch"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.0"

@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Thirty-seven migrations, run in filename order:
+Forty migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -212,6 +212,40 @@ operator-managed content, safety + analytics — run after 1–17):
     fields on INSERT. Apply before/with the updated OTP verify route. See the
     [Phase 1 audit](../docs/audits/step13-phase1-audit.md) for open findings and
     [evidence](../docs/audits/step13-evidence.md) for migration/test limitations.
+
+38. `20260920170000_step14_hardening.sql` — **Step 14 production hardening.**
+    Live-membership gate on listable profile photos, storage bucket/object RLS
+    and server authorization, moments lifecycle + storage-path authority,
+    verification-document path validation, report INSERT lockdown, the
+    server-authoritative 18+ age gate, moment/daily-match notifications, the
+    member `sweep_my_membership()` lazy expiry sweep and the individual
+    compatibility RPC. See `docs/audits/step14-closure-report.md`.
+
+39. `20260920180000_enum_tier_platinum.sql` — `membership_tier += 'platinum'`,
+    the **promotional-only** tier used by the Platinum Launch Offer. Own file
+    for the same PostgreSQL reason as #7 and #16: a new enum value cannot be
+    *used* in the transaction that created it, and migration 40 uses it.
+    **Do not merge.** No purchasable plan ever carries this tier.
+
+40. `20260920190000_platinum_launch_offer.sql` — **Platinum Launch Offer**
+    (temporary launch promotion, additive; paid Smart/Premium/VIP untouched).
+    New `platinum_launch_campaigns` (seeded `FIRST_100_PLATINUM`, 100 slots,
+    enabled) + `platinum_launch_claims` ledger (one row per member per
+    campaign, UNIQUE — the authoritative slot counter; users are NEVER
+    counted). Two non-purchasable 0-price promotional packages
+    (`platinum-launch-30d`, `platinum-demo-24h`, `is_active = FALSE`) so a
+    grant is an ordinary `subscriptions` row every existing gate already
+    honours. `claim_platinum_launch_offer()` (authenticated, `auth.uid()`
+    only) atomically grants the first 100 eligible members a free 30-day
+    Platinum membership and — once the slots are claimed — every member who
+    completes the publish-gate profile details exactly one free 24-hour
+    Platinum demo; idempotent under refresh/retry/races (advisory lock +
+    campaign row lock + unique indexes), never creates a payment, never
+    shortens/delays a paid membership. `get_my_platinum_launch()` member
+    read; `platinum_promotion_expired` activity event via a subscriptions
+    trigger; service-role-only `reset_platinum_launch_campaign(p_confirm)`
+    development/admin reset back to 0/100. See "Platinum Launch Offer" below
+    and `docs/platinum-launch-offer.md`.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's
@@ -624,6 +658,122 @@ subscription rows. Payment, membership, boost and refund activity is scrubbed
 of secrets/card data and protected with database uniqueness where an
 idempotency key is supplied; activity events are not the financial source of
 truth.
+
+## Platinum Launch Offer (migrations 39–40)
+
+A **temporary launch promotion**, layered additively on the existing
+membership architecture. The paid price list (Smart ₹999/90, Premium
+₹2,499/180, VIP ₹4,999/365) and every paid code path are untouched.
+
+```text
+platinum_launch_campaigns (1 row)   campaign_key FIRST_100_PLATINUM
+                                    total_slots 100 · enabled TRUE
+        │  row locked FOR UPDATE on every claim (serialises all members)
+        ▼
+platinum_launch_claims (ledger)     UNIQUE(campaign_id, user_id)
+                                    grant_type first_100 (slot_number 1..100)
+                                               demo_24h  (no slot consumed)
+                                    subscription_id ──► subscriptions row
+                                    (payment_id NULL — never a purchase)
+```
+
+**The counter is the ledger — users are never counted.** Existing
+development/test accounts in `auth.users` / `profiles` /
+`matrimony_profiles` cannot consume launch slots: a slot exists only when
+`claim_platinum_launch_offer()` writes a `grant_type='first_100'` claim row.
+A fresh production database therefore starts at **0/100 claimed** by
+construction, regardless of how many accounts already exist.
+
+**Eligibility & trigger point.** Bare registration grants nothing. The
+promotion fires only when the SERVER determines the member satisfies the
+canonical publish-gate completeness checklist — the existing
+`admin_profile_missing()` (gender, 18+ date of birth, city, education,
+occupation, profile photo AND the mandatory family photo) — with an active
+account that is not suspended/rejected/admin-held (existing admin rules stay
+authoritative; a blocked attempt writes no claim and wastes no slot). The
+app calls the RPC after a successful wizard save and lazily on the dashboard
+(same pattern as `sweep_my_membership()`); the browser supplies nothing but
+the session.
+
+**How the first-100 allocation works (atomic).** One RPC call, one
+transaction: (1) per-member `pg_advisory_xact_lock`; (2) existing claim →
+return it (`already_claimed`); (3) campaign `SELECT … FOR UPDATE`; (4)
+`count(*)` of `first_100` claims **in the ledger under that lock**; (5)
+count < 100 → insert the subscription (30-day promotional package,
+`payment_id NULL`, server-generated `now()`/`now()+30d`) + the claim with
+`slot_number = count+1`; else → the 24-hour demo path. Two simultaneous
+members can never both receive slot 100 (the row lock serialises them and
+the partial UNIQUE index on `(campaign_id, slot_number)` is the final
+arbiter), and `UNIQUE(campaign_id, user_id)` makes double claims impossible
+even for a forced writer.
+
+**Precedence rules enforced by the ledger.**
+* A first-100 member never also receives the demo (one claim row per member
+  per campaign — rules E, C, D).
+* After exhaustion, each completing member receives **exactly one** 24-hour
+  demo; re-editing/re-saving the profile, refreshing, or logging out/in
+  returns the same grant with the same server-generated window.
+* Promotional grants **overlap** the current time window instead of stacking
+  after a paid plan, so a paid membership is never shortened, delayed or
+  masked (`get_membership()` keeps reporting the longest-running live
+  subscription). A paid purchase made while a promo runs follows the
+  EXISTING renewal-stacking rule (paid period starts where the live plan
+  ends) — paid rules stay authoritative.
+* Expiry uses the existing sweeps (`sweep_expired_memberships()` /
+  `sweep_my_membership()`): a lapsed demo hides the profile again unless
+  another live membership exists, and the
+  `subscriptions_log_promotion_expiry` trigger records
+  `platinum_promotion_expired` (idempotent) + a promo-worded notification.
+* Analytics events: `platinum_first_100_granted`,
+  `platinum_demo_24h_granted`, `platinum_promotion_expired` — all in the
+  canonical vocabulary, all marked `source: launch_promotion`. A
+  promotional grant NEVER writes a `payments` row, never appears as Razorpay
+  revenue, and cannot: the promotional packages are `is_active = FALSE` /
+  `price_inr = 0`, so `validate_payment_snapshot()` rejects any payment for
+  them and `activate_membership()` refuses to activate them.
+
+**Security.** Members may SELECT only their own claim rows; campaign state
+is service-role only. All writes happen inside SECURITY DEFINER RPCs.
+`claim_platinum_launch_offer()` / `get_my_platinum_launch()` take **no
+arguments** (always `auth.uid()`) — nobody can claim or inspect another
+member's entitlement, spoof a slot, or change a grant type/expiry
+(subscription INSERT/UPDATE remain revoked for `authenticated`).
+
+**Admin.** `/admin/launch-offer` shows claimed/remaining slots, every
+first-100 grant (slot, member, granted/start/expiry, source) and every demo
+grant, with an enable/disable switch (`togglePlatinumCampaign`) and the
+typed-confirmation reset below — both audited into `admin_audit_log`.
+
+### Resetting the first-100 promotion (DEVELOPMENT ONLY)
+
+> ⚠️ **DEVELOPMENT ONLY — DO NOT RUN IN PRODUCTION.**
+> Resetting removes real members' free Platinum entitlements.
+
+`public.reset_platinum_launch_campaign(p_confirm)` (service-role EXECUTE
+only; `p_confirm` must equal `FIRST_100_PLATINUM`) returns the campaign to
+**0/100 claimed**. It deletes ONLY the campaign's claim rows and ONLY the
+promotional subscriptions they created (belt-and-braces: `payment_id IS
+NULL` **and** a promotional package slug must both match). It never deletes
+users or profiles, never touches paid Smart/Premium/VIP subscriptions,
+Razorpay payments, boosts or activity history, and afterwards restores
+profile-status truth (profiles live ONLY through a promotion fall back to
+`expired`, exactly like the sweeps).
+
+Run it either way:
+
+* **SQL Editor / script** — `supabase/dev/reset_platinum_launch_DEV_ONLY.sql`
+  (the editor runs as the table owner, so the service-role RPC is
+  executable):
+  ```sql
+  SELECT public.reset_platinum_launch_campaign('FIRST_100_PLATINUM');
+  ```
+* **Admin panel** — Admin → Launch offer → "Reset to 0/100", typing the
+  campaign key as confirmation (audited as `platinum_campaign_reset`).
+
+**Production deployment** simply applies migration 40: the seed creates the
+empty ledger, so the campaign starts at 0/100 with no reset needed. The
+reset exists for staging/testing BEFORE go-live (and as an audited admin
+emergency tool afterwards).
 
 ## Profile Boost model (migration 25)
 
