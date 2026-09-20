@@ -38,14 +38,16 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
   const isSelf = targetId === user.id
 
   if (!isSelf) {
-    // paid + mutual — the exact contact-unlock rule.
-    const [mutualRes, paidRes] = await Promise.all([
+    // paid + mutual — the exact contact-unlock rule. Blocked pairs are excluded.
+    const [mutualRes, paidRes, blockedRes] = await Promise.all([
       supabase.rpc('mutual_interest_exists', { p_a: user.id, p_b: targetId }),
       supabase.rpc('has_live_membership', { p_user_id: user.id }),
+      supabase.rpc('is_blocked', { p_a: user.id, p_b: targetId }),
     ])
     const mutual = mutualRes.data === true
     const paid = paidRes.data === true
-    if (!mutual || !paid) {
+    const blocked = blockedRes.data === true
+    if (!mutual || !paid || blocked) {
       return NextResponse.json(
         { error: 'Biodata unlocks after a mutual, accepted interest.' },
         { status: 403 }

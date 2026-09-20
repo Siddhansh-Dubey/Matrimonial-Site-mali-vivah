@@ -278,29 +278,13 @@ export async function decideVerification(formData: FormData) {
   const note = str(formData, 'note') || null
   if (decision !== 'verified' && decision !== 'rejected') throw new Error('Bad decision')
   const { admin } = ctx
-  const { data: req, error: loadErr } = await admin
-    .from('verification_requests')
-    .select('id, user_id, type')
-    .eq('id', requestId)
-    .single()
-  if (loadErr || !req) throw new Error(loadErr?.message ?? 'Request not found')
-  const { error } = await admin
-    .from('verification_requests')
-    .update({
-      status: decision,
-      note,
-      reviewed_by: ctx.userId,
-      reviewed_at: new Date().toISOString(),
-    })
-    .eq('id', requestId)
-    .eq('status', 'pending')
-  if (error) throw new Error(error.message)
-  // The AFTER UPDATE trigger (apply_verification_decision) applies the badge,
-  // notifies and audit-logs. We log the decision itself as well.
-  await audit(ctx, `verification_${decision}`, 'verification_request', requestId, {
-    user_id: req.user_id,
-    type: req.type,
+  const { error } = await admin.rpc('admin_decide_verification', {
+    p_admin_id: ctx.userId,
+    p_request_id: requestId,
+    p_decision: decision,
+    p_note: note,
   })
+  if (error) throw new Error(error.message)
   revalidatePath('/admin/verification')
 }
 
@@ -418,9 +402,12 @@ export async function resolveReport(formData: FormData) {
   const status = str(formData, 'status') as 'reviewing' | 'resolved' | 'dismissed'
   if (!['reviewing', 'resolved', 'dismissed'].includes(status)) throw new Error('Bad status')
   const { admin } = ctx
-  const { error } = await admin.from('reports').update({ status }).eq('id', reportId)
+  const { error } = await admin.rpc('admin_resolve_report', {
+    p_admin_id: ctx.userId,
+    p_report_id: reportId,
+    p_status: status,
+  })
   if (error) throw new Error(error.message)
-  await audit(ctx, `report_${status}`, 'report', String(reportId))
   revalidatePath('/admin/reports')
 }
 
