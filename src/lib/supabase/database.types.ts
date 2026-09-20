@@ -1813,6 +1813,69 @@ export type Database = {
         }
         Returns: Json
       }
+      /** Step 10: Server-authoritative report profile. */
+      report_profile: {
+        Args: {
+          p_target_id: string
+          p_reason?: Database['public']['Enums']['report_reason']
+          p_details?: string | null
+        }
+        Returns: Json
+      }
+      /** Step 10: Server-authoritative block member. */
+      block_member: {
+        Args: {
+          p_target_id: string
+          p_reason?: string | null
+        }
+        Returns: Json
+      }
+      /** Step 10: Server-authoritative unblock member. */
+      unblock_member: {
+        Args: {
+          p_target_id: string
+        }
+        Returns: Json
+      }
+      /** Step 10: Admin decide verification request. */
+      admin_decide_verification: {
+        Args: {
+          p_admin_id: string
+          p_request_id: string
+          p_decision: string
+          p_note?: string | null
+        }
+        Returns: Json
+      }
+      /** Step 10: Admin resolve report. */
+      admin_resolve_report: {
+        Args: {
+          p_admin_id: string
+          p_report_id: number
+          p_status: string
+          p_note?: string | null
+        }
+        Returns: Json
+      }
+      /** Step 10: Admin list blocks. */
+      admin_list_blocks: {
+        Args: {
+          p_admin_id: string
+          p_search?: string | null
+          p_limit?: number | null
+        }
+        Returns: Json
+      }
+      /** Step 10: Admin toggle member verified badge. */
+      admin_set_member_verified: {
+        Args: {
+          p_admin_id: string
+          p_user_id: string
+          p_verified: boolean
+          p_reason?: string | null
+        }
+        Returns: Json
+      }
     }
     Enums: {
       for_whom: 'self' | 'son' | 'daughter'

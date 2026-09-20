@@ -138,14 +138,13 @@ export function ProfileActions({ profileId }: { profileId: string }) {
         router.push('/login')
         return
       }
-      const { error: insertError } = await supabase.from('reports').insert({
-        reporter_id: uid,
-        reported_id: profileId,
-        reason: reportReason,
-        details: reportDetails.trim() || null,
+      const { error: rpcError } = await supabase.rpc('report_profile', {
+        p_target_id: profileId,
+        p_reason: reportReason,
+        p_details: reportDetails.trim() || null,
       })
-      if (insertError) {
-        setError({ text: insertError.message, upgrade: false })
+      if (rpcError) {
+        setError({ text: rpcError.message, upgrade: false })
       } else {
         setReportDone(true)
         setReportOpen(false)
@@ -168,15 +167,16 @@ export function ProfileActions({ profileId }: { profileId: string }) {
         return
       }
       if (blocked) {
-        await supabase.from('blocks').delete().eq('blocker_id', uid).eq('blocked_id', profileId)
-        setBlocked(false)
+        const { error: unblockErr } = await supabase.rpc('unblock_member', { p_target_id: profileId })
+        if (unblockErr) {
+          setError({ text: unblockErr.message, upgrade: false })
+        } else {
+          setBlocked(false)
+        }
       } else {
-        const { error: insertError } = await supabase.from('blocks').insert({
-          blocker_id: uid,
-          blocked_id: profileId,
-        })
-        if (insertError && insertError.code !== '23505') {
-          setError({ text: insertError.message, upgrade: false })
+        const { error: blockErr } = await supabase.rpc('block_member', { p_target_id: profileId })
+        if (blockErr) {
+          setError({ text: blockErr.message, upgrade: false })
         } else {
           setBlocked(true)
         }
