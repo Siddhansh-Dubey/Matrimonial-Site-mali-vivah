@@ -14,7 +14,9 @@ export default async function AdminReportsPage() {
     .order('created_at', { ascending: true })
     .limit(100)
 
-  const ids = [...new Set((rows ?? []).flatMap((r) => [r.reporter_id, r.reported_id]))]
+  const ids = [
+    ...new Set((rows ?? []).flatMap((r) => [r.reporter_id, r.reported_id]).filter((id): id is string => Boolean(id))),
+  ]
   const emptyId = '00000000-0000-0000-0000-000000000000'
   const { data: people } = await admin
     .from('profiles')
@@ -39,11 +41,11 @@ export default async function AdminReportsPage() {
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-stone-900">
-                  {nameBy.get(r.reported_id)?.full_name ?? r.reported_id.slice(0, 8)} reported for{' '}
+                  {nameBy.get(r.reported_id ?? '')?.full_name ?? (r.reported_id ? r.reported_id.slice(0, 8) : 'Deleted member')} reported for{' '}
                   <span className="text-brand-700">{r.reason.replace(/_/g, ' ')}</span>
                 </p>
                 <p className="text-xs text-stone-500">
-                  by {nameBy.get(r.reporter_id)?.full_name ?? r.reporter_id.slice(0, 8)} ·{' '}
+                  by {nameBy.get(r.reporter_id ?? '')?.full_name ?? (r.reporter_id ? r.reporter_id.slice(0, 8) : 'Deleted member')} ·{' '}
                   {new Date(r.created_at).toLocaleString('en-IN')}
                 </p>
                 {r.details && <p className="mt-1 text-sm text-stone-600">“{r.details}”</p>}

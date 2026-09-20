@@ -1226,10 +1226,11 @@ export async function adminGrantBoost(formData: FormData) {
  *      as confirmation) and records the audit row + activity events while
  *      the user id still resolves;
  *   2. storage is wiped with the SAME helper the member self-delete uses;
- *   3. the auth user is deleted — every table cascades from the profile id
- *      (subscriptions, payments, interests, messages, photos, moments,
- *      notifications, boosts, verification…); audit / activity references
- *      are SET NULL so the record of the deletion survives.
+ *   3. the auth user is deleted — personal tables cascade from the profile
+ *      id (interests, messages, photos, moments, notifications, boosts,
+ *      verification…). Payments, subscriptions and reports are retained
+ *      with user_id SET NULL; audit / activity references are SET NULL so
+ *      the record of the deletion survives.
  */
 export async function adminDeleteMember(formData: FormData) {
   const ctx = await requireAdminAction()

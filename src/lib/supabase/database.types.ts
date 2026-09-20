@@ -22,6 +22,7 @@
  * - 20260917010000_chat.sql                   (conversations, conversation_members, messages + chat RPCs)
  * - 20260919120000_admin_member_management.sql (admin hold / suspension columns, admin_* member RPCs)
  * - 20260920000000_featured_boost_ordering.sql (deterministic featured + boost-first search ordering)
+ * - 20260920140000_privacy_account_lifecycle.sql (fail-safe deletion, payment/report retention, privacy RLS)
  *
  * If you change the SQL, update this file to match.
  */
@@ -552,7 +553,7 @@ export type Database = {
       subscriptions: {
         Row: {
           id: number
-          user_id: string
+          user_id: string | null
           package_id: number | null
           package_slug: string | null
           payment_id: string | null
@@ -564,7 +565,7 @@ export type Database = {
         }
         Insert: {
           id?: never
-          user_id: string
+          user_id?: string | null
           package_id?: number | null
           package_slug?: string | null
           payment_id?: string | null
@@ -576,7 +577,7 @@ export type Database = {
         }
         Update: {
           id?: never
-          user_id?: string
+          user_id?: string | null
           package_id?: number | null
           package_slug?: string | null
           payment_id?: string | null
@@ -606,7 +607,7 @@ export type Database = {
       payments: {
         Row: {
           id: string
-          user_id: string
+          user_id: string | null
           package_id: number | null
           package_slug: string | null
           kind: 'package' | 'boost'
@@ -624,7 +625,7 @@ export type Database = {
         }
         Insert: {
           id?: string
-          user_id: string
+          user_id?: string | null
           package_id?: number | null
           package_slug?: string | null
           kind?: 'package' | 'boost'
@@ -642,7 +643,7 @@ export type Database = {
         }
         Update: {
           id?: string
-          user_id?: string
+          user_id?: string | null
           package_id?: number | null
           package_slug?: string | null
           kind?: 'package' | 'boost'
@@ -828,8 +829,8 @@ export type Database = {
       reports: {
         Row: {
           id: number
-          reporter_id: string
-          reported_id: string
+          reporter_id: string | null
+          reported_id: string | null
           reason: Database['public']['Enums']['report_reason']
           details: string | null
           status: Database['public']['Enums']['report_status']
@@ -840,8 +841,8 @@ export type Database = {
         }
         Insert: {
           id?: never
-          reporter_id: string
-          reported_id: string
+          reporter_id?: string | null
+          reported_id?: string | null
           reason?: Database['public']['Enums']['report_reason']
           details?: string | null
           status?: Database['public']['Enums']['report_status']
@@ -852,8 +853,8 @@ export type Database = {
         }
         Update: {
           id?: never
-          reporter_id?: string
-          reported_id?: string
+          reporter_id?: string | null
+          reported_id?: string | null
           reason?: Database['public']['Enums']['report_reason']
           details?: string | null
           status?: Database['public']['Enums']['report_status']
@@ -1674,6 +1675,10 @@ export type Database = {
       }
       is_blocked: { Args: { p_a: string; p_b: string }; Returns: boolean }
       request_account_deletion: { Args: { p_reason?: string | null }; Returns: Json }
+      /** Step 11: self-serve deletion. Always acts on auth.uid(); no user_id argument. */
+      delete_my_account: { Args: Record<string, never>; Returns: Json }
+      /** Step 11: allow-listed write of the caller's privacy_settings. */
+      update_my_privacy_settings: { Args: { p_settings: Json }; Returns: Json }
       activate_membership: {
         Args: { p_user_id: string; p_package_id: number; p_payment_id?: string | null }
         Returns: Json

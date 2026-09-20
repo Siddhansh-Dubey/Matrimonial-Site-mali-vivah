@@ -45,7 +45,7 @@ export default async function InterestsPage() {
   const emptyId = '00000000-0000-0000-0000-000000000000'
   const counterparties = await admin
     .from('profiles')
-    .select('id, full_name, mobile')
+    .select('id, full_name')
     .in('id', ids.length ? ids : [emptyId])
   const counterPhoto = await admin
     .from('profile_photos')

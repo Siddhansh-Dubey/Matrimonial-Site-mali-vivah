@@ -648,7 +648,7 @@ export default async function adminMembersSuite(db) {
       fns.every((f) => !f.auth_exec && !f.anon_exec), fns.filter((f) => f.auth_exec || f.anon_exec).map((f) => f.proname))
     t.check('every admin RPC is executable by service_role', fns.every((f) => f.svc_exec))
     const policy = await one(db, `SELECT pg_get_expr(polqual, polrelid) AS q FROM pg_policy WHERE polname = 'Members read active matrimony profiles'`)
-    t.check('member read policy also requires no admin hold', /admin_hidden_at IS NULL/.test(policy?.q ?? ''), policy)
+    t.equal('members-read-active matrimony policy is gone (owner-only SELECT; public data goes through RPCs)', policy, null)
     const isPublicSrc = await scalar(db, `SELECT prosrc FROM pg_proc WHERE proname = 'is_profile_public'`)
     t.check('is_profile_public() checks the admin hold', /admin_hidden_at IS NULL/.test(isPublicSrc))
     const cols = (await db.query(`SELECT column_name FROM information_schema.columns WHERE table_name = 'matrimony_profiles' AND column_name IN ('admin_hidden_at','admin_hidden_by','admin_hidden_reason','suspended_at','suspended_by','suspension_reason','status_before_suspension')`)).rows

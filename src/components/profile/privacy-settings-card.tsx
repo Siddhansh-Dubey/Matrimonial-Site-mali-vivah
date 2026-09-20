@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Check, Loader2, MessageCircle, ShieldCheck } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { isSupabaseConfigured } from '@/lib/env'
-import type { Json } from '@/lib/supabase/database.types'
+import { updateMyPrivacySettings, type PrivacySettingsPatch } from '@/app/profile/actions'
 
 type PrivacyState = {
   showAbout: boolean
@@ -47,9 +47,10 @@ const ROWS: {
 ]
 
 /**
- * Privacy toggles (PRD H). Writes are a single server upsert of the member's
- * OWN matrimony_profiles row (RLS-scoped) — no RPC needed, nothing can be
- * tampered with for another member.
+ * Privacy toggles (PRD H). The four visibility keys are written through
+ * `update_my_privacy_settings()` (server action → SECURITY DEFINER RPC,
+ * allow-listed keys, always auth.uid()). WhatsApp opt-in stays a separate
+ * owner-only column write — that product rule is unchanged.
  *
  * Note: `show_family_photo` only hides the photo from paid viewers. It does
  * NOT change publishability (the family photo is still required to go
@@ -76,19 +77,8 @@ export function PrivacySettingsCard({ initial }: { initial: PrivacyState }) {
 
       const dbKey = ROWS.find((r) => r.key === key)?.dbKey
       if (dbKey) {
-        // Read-modify-write the JSONB so unrelated keys survive.
-        const { data: row } = await supabase
-          .from('matrimony_profiles')
-          .select('privacy_settings')
-          .eq('user_id', uid)
-          .maybeSingle()
-        const current = (row?.privacy_settings ?? {}) as Record<string, Json>
-        const merged: Record<string, Json> = { ...current, [dbKey]: next[key] }
-        const { error: upError } = await supabase
-          .from('matrimony_profiles')
-          .update({ privacy_settings: merged as Json })
-          .eq('user_id', uid)
-        if (upError) throw new Error(upError.message)
+        const result = await updateMyPrivacySettings({ [dbKey]: next[key] } as PrivacySettingsPatch)
+        if (!result.ok) throw new Error(result.error)
       } else {
         const { error: upError } = await supabase
           .from('matrimony_profiles')

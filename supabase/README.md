@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Thirty-three migrations, run in filename order:
+Thirty-five migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -187,6 +187,16 @@ operator-managed content, safety + analytics — run after 1–17):
     configured, never more. Signature, weights, scoring, reasons, threshold
     semantics and all visibility gates are unchanged; there is still NO
     padding. See "Daily 5 matching engine" below.
+34. `20260920130000_verification_trust_safety.sql` — **Verification + Trust
+    & Safety (Step 10).** Server-authoritative verification, reports and
+    blocks. Not rebuilt in Step 11.
+35. `20260920140000_privacy_account_lifecycle.sql` — **Privacy, account
+    deletion and data lifecycle (Step 11).** Fail-safe `delete_my_account()`
+    / `retire_account_data()` (hide first), payment/subscription/report
+    retention (`ON DELETE SET NULL`), privacy RLS (owner-only matrimony
+    SELECT, family photos owner-or-RPC), `update_my_privacy_settings()`,
+    contact gates that refuse deactivated viewers, moments restricted to
+    publicly-listed authors. See "Personal-data lifecycle" below.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's
@@ -425,8 +435,12 @@ Highlights:
   the onboarding wizard (`/profile/edit`) always has a row to upsert into.
 - **Lifecycle.** `matrimony_profiles.status` is `draft` until the member
   publishes; only `active` rows appear in Browse / Search.
-- **RLS.** Owners manage their own rows; other members can read only `active`
-  profiles (and their photos). Preferences are strictly private.
+- **RLS.** Owners manage their own rows. Other members cannot `SELECT`
+  another member's `matrimony_profiles` row (privacy-gated fields live
+  there); public data goes through `get_public_profile` / `search_matches` /
+  Daily 5 / featured. Profile photos of currently-active unblocked profiles
+  remain readable; family photos are owner-or-RPC. Preferences are strictly
+  private.
 
 The UI for this flow lives under `/profile`, `/profile/edit`, `/search`,
 `/brides`, `/grooms`, `/profile/[id]`, `/interests`, `/shortlist` and
@@ -582,7 +596,7 @@ and writes the audit trail itself:
 | Hide / Unhide | `admin_set_profile_hidden()` — the **admin hold** flag | `status`, membership, subscriptions and payments untouched; `is_profile_public()` is FALSE until the hold is lifted; the member's dashboard says `admin_hidden` |
 | Edit | `admin_update_member_profile()` — allow-listed columns (+ partner preferences, `full_name`); the hierarchy trigger validates community ↔ sub-community; `company` and `business_name` stay separate | unchanged status |
 | Verify / Feature / Boost / Mark paid | unchanged mechanisms (`verified_at`, `featured_profiles`, `admin_grant_boost()`, `activate_membership()`) | verified ≠ paid ≠ public; only publicly visible profiles can be newly featured; Mark paid never un-suspends |
-| Delete | `admin_prepare_member_deletion()` (refuses self and other admins, requires the exact e-mail) → storage wipe → `auth.admin.deleteUser()` | every table cascades from `profiles.id`; `admin_audit_log` (name, masked e-mail, footprint, reason) and anonymised `activity_events` survive |
+| Delete | `admin_prepare_member_deletion()` (refuses self and other admins, requires the exact e-mail, **hides the profile immediately**) → storage wipe → `auth.admin.deleteUser()` | personal tables cascade from `profiles.id`; payments / subscriptions / reports / `admin_audit_log` / `activity_events` survive with user_id SET NULL |
 
 Activity events written for admins (`admin_member_*`,
 `admin_manual_membership_activation`) carry state facts only — members can
@@ -658,6 +672,55 @@ threshold; no machine learning and no AI anywhere:
   status, education, city, state, diet) stay gated behind
   `has_live_membership(viewer)` as before, and no card carries contact
   details.
+
+## Personal-data lifecycle (migration 35)
+
+Engineering behaviour — **not** a legal-compliance claim. The PRD does not
+define retention periods, so this table records what the code actually does.
+
+HIDE, SUSPEND, EXPIRED and DELETE are different states and stay different.
+No new `profile_status` value is introduced.
+
+| Record | HIDE (admin hold) | SUSPEND | EXPIRED membership | DELETE (self or admin) |
+|---|---|---|---|---|
+| Public listing (`is_profile_public`) | false (hold flag) | false (`status=suspended`) | false (`status=expired`, no live plan) | false immediately (`is_active=false`), then the row is removed |
+| Search / Daily 5 / featured / boost ranking | excluded | excluded | excluded | excluded (featured row deleted; live boost cancelled) |
+| Contact (`get_profile_contact` / `get_public_profile`) | null | null | null | null (anonymised, then gone) |
+| Interests / chat | cannot receive new; existing chat `can_chat_with` is false if either account is inactive | same | same (`has_live_membership` false) | rows CASCADE with the profile |
+| Profile + family photos | stay on disk; listing hidden | stay on disk; listing hidden | stay on disk; listing hidden | DB rows deleted; storage prefix `<uid>/` wiped in `profile-photos` and `verification-docs` |
+| Mali Moments | hidden from `list_moments` (author not public) | same | same | marked removed, then CASCADE; files under `<uid>/` wiped |
+| Verification documents | private bucket, owner-only | private bucket, owner-only | private bucket, owner-only | wiped with the storage prefix |
+| Payments / subscriptions | untouched | untouched | subscription expires; payment kept | **retained**, `user_id` SET NULL (Razorpay ids / amounts kept) |
+| Reports | untouched | untouched | untouched | **retained**, reporter/reported SET NULL |
+| `activity_events` / `admin_audit_log` | new events as usual | new events as usual | expiry events | **retained**, user/admin id SET NULL |
+| Published success stories | untouched | untouched | untouched | `submitted_by` SET NULL; published copy stays (admin-managed public content) |
+| Auth login | still works | still works | still works | `auth.users` removed |
+
+**Fail-safe deletion.** `delete_my_account()` (member, `auth.uid()` only — no
+user_id argument) and `admin_prepare_member_deletion()` both call
+`retire_account_data()` **before** storage wipe / `auth.admin.deleteUser()`.
+Hide cannot roll back if a later detach fails. A partial deletion therefore
+cannot remain ACTIVE_PAID, searchable, featured, boosted, contactable or able
+to send/receive new interest.
+
+**Privacy settings** (`show_about`, `show_family_details`, `show_family_photo`,
+`show_income`) are enforced in `get_public_profile` and
+`update_my_privacy_settings()`. Direct table reads of another member's
+matrimony row are refused. Contact is never a privacy toggle: phone / email /
+WhatsApp still require paid + mutual + both accounts active.
+
+**Storage.** `profile-photos` remains a public-read bucket for genuinely
+public ACTIVE_PAID profile photos (intentional). Family photos of other
+members are not readable via table RLS. `verification-docs` stays private.
+Expired moments are excluded from `list_moments` and from other members'
+SELECT; files in the public bucket remain until account deletion. Shared
+admin-managed assets (site content, published success-story photos outside
+the member prefix) are never wiped by member deletion.
+
+**Remaining limitations.** Orphan payments after deletion cannot be refunded
+through `refund_membership()` (no user_id). Expired moment files are not
+swept from the public bucket on a timer. Direct GET of a previously known
+public photo URL may still succeed until storage wipe completes.
 
 ## Useful admin queries (matchmaking)
 

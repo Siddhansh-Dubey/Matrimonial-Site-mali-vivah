@@ -38,16 +38,19 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
   const isSelf = targetId === user.id
 
   if (!isSelf) {
-    // paid + mutual — the exact contact-unlock rule. Blocked pairs are excluded.
-    const [mutualRes, paidRes, blockedRes] = await Promise.all([
+    // Same gates as get_profile_contact: paid + mutual + unblocked + target
+    // currently public (so expired / suspended / hidden / deleted never leak).
+    const [mutualRes, paidRes, blockedRes, publicRes] = await Promise.all([
       supabase.rpc('mutual_interest_exists', { p_a: user.id, p_b: targetId }),
       supabase.rpc('has_live_membership', { p_user_id: user.id }),
       supabase.rpc('is_blocked', { p_a: user.id, p_b: targetId }),
+      supabase.rpc('is_profile_public', { p_user_id: targetId }),
     ])
     const mutual = mutualRes.data === true
     const paid = paidRes.data === true
     const blocked = blockedRes.data === true
-    if (!mutual || !paid || blocked) {
+    const isPublic = publicRes.data === true
+    if (!mutual || !paid || blocked || !isPublic) {
       return NextResponse.json(
         { error: 'Biodata unlocks after a mutual, accepted interest.' },
         { status: 403 }
@@ -76,13 +79,24 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
     return NextResponse.json({ error: 'Profile not found.' }, { status: 404 })
   }
 
-  // Never leak the phone into a PDF for others unless it is self or paid+mutual
-  // (checked above) — and never embed it at all for self downloads either when
-  // the member has it hidden? The member always knows their own number, fine.
-  const phone = person.mobile
+  // Privacy toggles are honoured for other members (self-download is the
+  // member's own copy). Contact for others comes from get_profile_contact,
+  // never from the service-role profiles.mobile read.
+  const privacy = (mp.privacy_settings ?? {}) as Record<string, unknown>
+  const show = (key: string) => isSelf || privacy[key] !== false
+
+  let phone: string | null = null
+  if (isSelf) {
+    phone = person.mobile
+  } else {
+    const { data: gatedPhone } = await supabase.rpc('get_profile_contact', { p_user_id: targetId })
+    phone = (gatedPhone as string | null) ?? null
+  }
 
   const profilePhotos = (photoRes.data ?? []).filter((p) => p.kind === 'profile_photo')
-  const familyPhoto = (photoRes.data ?? []).find((p) => p.kind === 'family_photo')
+  const familyPhoto = show('show_family_photo')
+    ? (photoRes.data ?? []).find((p) => p.kind === 'family_photo')
+    : undefined
   const primaryPath = profilePhotos[0]?.storage_path ?? null
 
   // ----- build the PDF -----
@@ -174,7 +188,7 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
   // `line()` skips empty values, so a member without a business name never
   // sees an empty "Business Name:" row in the PDF.
   line('Business Name', mp.business_name)
-  line('Annual income', mp.annual_income)
+  line('Annual income', show('show_income') ? mp.annual_income : null)
   rule()
 
   section('Location', page, bold)
@@ -182,13 +196,14 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
   line('Native place', mp.native_place)
   rule()
 
+  const familyDetails = show('show_family_details') ? mp.family_details : null
   const hasFamily = Boolean(
     mp.father_occupation ||
       mp.mother_occupation ||
       mp.siblings ||
       mp.family_type ||
       mp.family_location ||
-      mp.family_details ||
+      familyDetails ||
       familyPhoto
   )
   if (hasFamily) {
@@ -198,16 +213,16 @@ export async function GET(_req: Request, { params }: { params: { userId: string 
     line('Siblings', mp.siblings)
     line('Family type', mp.family_type ? titleCase(mp.family_type) : null)
     line('Family lives in', mp.family_location)
-    if (mp.family_details) {
+    if (familyDetails) {
       label('About the family')
-      y = drawWrapped(page, mp.family_details, M + 150, y, 330, bold, 10, INK)
+      y = drawWrapped(page, familyDetails, M + 150, y, 330, bold, 10, INK)
       y -= 12
       label('')
     }
     rule()
   }
 
-  if (mp.about_me) {
+  if (show('show_about') && mp.about_me) {
     section('About', page, bold)
     y = drawWrapped(page, mp.about_me, M, y, W, font, 10, INK)
     y -= 6

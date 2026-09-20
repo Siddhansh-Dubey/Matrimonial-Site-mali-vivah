@@ -64,7 +64,7 @@ export async function POST(req: Request) {
         if (payment.status !== 'captured') {
           if (payment.kind === 'boost') {
             await admin.rpc('activate_boost_purchase', { p_payment_id: payment.id })
-          } else if (payment.package_id != null) {
+          } else if (payment.package_id != null && payment.user_id) {
             await admin.rpc('activate_membership', {
               p_user_id: payment.user_id,
               p_package_id: payment.package_id,
