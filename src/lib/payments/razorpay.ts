@@ -35,6 +35,10 @@ export function isRazorpayConfigured(): boolean {
   return Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)
 }
 
+export function isRazorpayWebhookConfigured(): boolean {
+  return Boolean(process.env.RAZORPAY_WEBHOOK_SECRET)
+}
+
 export type RazorpayOrder = {
   id: string
   amount: number
@@ -43,21 +47,37 @@ export type RazorpayOrder = {
   receipt?: string | null
 }
 
+export type RazorpayPayment = {
+  id: string
+  order_id?: string | null
+  amount: number
+  currency: string
+  status: string
+  captured?: boolean
+  error_description?: string | null
+}
+
+function basicAuthHeader(): string {
+  return `Basic ${Buffer.from(`${razorpayKeyId()}:${razorpayKeySecret()}`).toString('base64')}`
+}
+
 /** Create a Razorpay order for `amountInr` whole rupees. */
 export async function createRazorpayOrder(input: {
   amountInr: number
   receipt: string
   notes?: Record<string, string>
 }): Promise<RazorpayOrder> {
-  const auth = Buffer.from(`${razorpayKeyId()}:${razorpayKeySecret()}`).toString('base64')
+  if (!Number.isSafeInteger(input.amountInr) || input.amountInr <= 0) {
+    throw new Error('Razorpay order amount must be a positive whole INR amount')
+  }
   const res = await fetch('https://api.razorpay.com/v1/orders', {
     method: 'POST',
     headers: {
-      Authorization: `Basic ${auth}`,
+      Authorization: basicAuthHeader(),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      amount: Math.round(input.amountInr * 100), // paise
+      amount: input.amountInr * 100, // paise
       currency: 'INR',
       receipt: input.receipt,
       notes: input.notes ?? {},
@@ -69,6 +89,25 @@ export async function createRazorpayOrder(input: {
   if (!res.ok || !body?.id) {
     const msg = body?.error?.description ?? `Razorpay order creation failed (HTTP ${res.status})`
     throw new Error(msg)
+  }
+  if (body.currency !== 'INR' || body.amount !== input.amountInr * 100) {
+    throw new Error('Razorpay returned an unexpected order amount or currency')
+  }
+  return body
+}
+
+/** Fetch the provider-side payment so a valid checkout signature is not the
+ * only fact used for activation. */
+export async function fetchRazorpayPayment(paymentId: string): Promise<RazorpayPayment> {
+  const res = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`, {
+    method: 'GET',
+    headers: { Authorization: basicAuthHeader() },
+  })
+  const body = (await res.json().catch(() => null)) as
+    | (RazorpayPayment & { error?: { description?: string } })
+    | null
+  if (!res.ok || !body?.id) {
+    throw new Error(`Razorpay payment lookup failed (HTTP ${res.status})`)
   }
   return body
 }

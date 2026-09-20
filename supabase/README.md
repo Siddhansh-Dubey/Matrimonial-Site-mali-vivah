@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Thirty-five migrations, run in filename order:
+Thirty-six migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -197,6 +197,13 @@ operator-managed content, safety + analytics — run after 1–17):
     SELECT, family photos owner-or-RPC), `update_my_privacy_settings()`,
     contact gates that refuse deactivated viewers, moments restricted to
     publicly-listed authors. See "Personal-data lifecycle" below.
+36. `20260920150000_payment_membership_lifecycle_audit.sql` — **Razorpay +
+    membership lifecycle production audit (Step 12).** Database package/
+    amount/currency/duration snapshots, payment state transitions, payment-to-user /
+    package subscription constraints, checkout idempotency keys, unique
+    activity idempotency, a server-only webhook replay ledger, locked and
+    idempotent membership/boost activation, exact-payment refunds and stale
+    account protections. See "Payment & membership lifecycle" below.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's
@@ -538,6 +545,77 @@ renders a row it was not entitled to read. No polling is used.
 > `public.messages` and `public.conversations` are listed, and enable RLS
 > enforcement for them if your project exposes that toggle. Nothing in the app
 > depends on it, because the payloads are never rendered directly.
+
+## Payment & membership lifecycle (migration 36 / Step 12)
+
+The payment lifecycle is server/database authoritative. Razorpay is the only
+provider used; the browser never supplies an amount, currency, duration, tier,
+or activation decision.
+
+**Packages.** The active rows in `public.packages` are the sole purchasable
+source: Smart ₹999/90 days, Premium ₹2,499/180 days and VIP ₹4,999/365 days.
+The order route accepts a validated package id/slug selector, reads the active
+row, and creates a `payments` snapshot from that row. It does not trust a
+client amount or duration. The boost add-on follows the same rule using
+`profile_boost_config`; its `is_active` flag gates new sales only.
+
+**Order creation.** An authenticated, active account is required. The server
+creates the Razorpay order in paise and stores the provider order id plus an
+amount/currency/duration snapshot against a `created` local payment before
+returning the public Razorpay key id. The API
+secret, webhook secret and service-role key never go to the browser or payment
+metadata. An opaque checkout idempotency key is unique per user and payment
+kind, so a retried order request reuses the same local/provider order instead
+of creating another attempt.
+
+**Verification and webhooks.** The checkout return must pass the server-side
+HMAC over `order_id|payment_id`, then the server fetches the Razorpay payment
+and checks its provider payment id, local order id, amount, currency and
+captured/authorized state. A signature by itself is not an activation token.
+The webhook verifies the HMAC over the raw body before parsing, rejects
+malformed or invalid requests, checks the same local order/payment/amount
+and currency relationship (including full refund amount), and records the
+provider event id in the server-only `payment_webhook_events` ledger. Unknown
+event types do not mutate state. Repeated verify calls and webhook deliveries
+are safe.
+
+**Activation and state.** `payments` distinguishes `created`, `authorized`,
+`captured`, `failed`, `cancelled` and `refunded`; invalid backward transitions
+are rejected. Only the service-role `activate_membership()` or
+`activate_boost_purchase()` RPC can grant an entitlement. Those functions lock
+the member/payment, validate the local owner and package relationship, derive
+subscription dates from the stored package/duration snapshot, and use a unique
+payment link plus idempotency keys. Membership renewals retain the
+existing stacking semantics. The admin manual activation workflow remains
+available through its existing payment-less path and is separately audited.
+
+**Expiry.** `has_live_membership()` and every public-listing/paid-action gate
+use `status = 'active' AND expires_at > now()`. The scheduled sweep updates
+subscription/profile state and emits one `membership_expired` event, but a
+stale sweep cannot leave an expired member searchable, recommended, featured,
+contactable or entitled to paid-only actions.
+
+**Refunds.** `refund_membership(payment_id)` is service-role-only and operates
+on that exact payment. Captured refunds cancel only the membership subscription
+created by that payment; an admin/manual subscription has no payment link and
+is not revoked. A boost refund revokes only its purchased ledger entitlement,
+preserving package/admin entitlements and other purchase slices. A provider
+refund received while the payment is still `created`/`authorized` marks that
+exact attempt refunded but revokes no entitlement. Duplicate refunds return
+`already_refunded` without duplicate notifications, entitlements or activity. This documents the application's existing refund behavior; it is
+not a legal or payment-compliance claim.
+
+**Account deletion.** Step 11 retains `payments` and `subscriptions` with
+`user_id = NULL`. A deleted/deactivated account cannot start an order or pass
+activation, and a late captured webhook may update the retained payment state
+but cannot recreate a profile, membership or boost. Refund processing can
+still mark an orphaned retained payment refunded without reviving the account.
+
+**Analytics.** Financial KPIs continue to read `payments` and authoritative
+subscription rows. Payment, membership, boost and refund activity is scrubbed
+of secrets/card data and protected with database uniqueness where an
+idempotency key is supplied; activity events are not the financial source of
+truth.
 
 ## Profile Boost model (migration 25)
 
