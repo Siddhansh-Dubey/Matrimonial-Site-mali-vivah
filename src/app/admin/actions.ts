@@ -1275,3 +1275,62 @@ export async function adminDeleteMember(formData: FormData) {
   revalidatePath('/admin')
   if (ok) redirect(withNotice(listPath, 'ok', 'deleted'))
 }
+
+// ---------------------------------------------------------------------------
+// Platinum Launch Offer (promotional campaign — never a payment)
+// ---------------------------------------------------------------------------
+
+/**
+ * Enable/disable the Platinum Launch Offer campaign. Switching it off stops
+ * BOTH the first-100 grants and the 24-hour demos (claim_platinum_launch_offer()
+ * checks the flag server-side); already-granted entitlements keep running
+ * until their normal expiry. The claimed-slot counter lives in the claim
+ * ledger and is never touched here.
+ */
+export async function togglePlatinumCampaign(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const campaignId = Number(str(formData, 'campaign_id'))
+  const enabled = str(formData, 'enabled') === 'true'
+  if (!Number.isFinite(campaignId) || campaignId <= 0) throw new Error('Invalid campaign')
+  const { admin } = ctx
+  const { error } = await admin
+    .from('platinum_launch_campaigns')
+    .update({ enabled })
+    .eq('id', campaignId)
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'platinum_campaign_toggle', 'platinum_launch_campaign', String(campaignId), {
+    enabled,
+  })
+  revalidatePath('/admin/launch-offer')
+  revalidatePath('/packages')
+}
+
+/**
+ * DEVELOPMENT/ADMIN reset of the first-100 promotion back to 0/100 claimed.
+ * Runs the service-role-only reset_platinum_launch_campaign() RPC, which
+ * removes ONLY this campaign's claim rows and ONLY the promotional
+ * subscriptions they created (payment_id NULL + promotional package slug).
+ * Users, profiles, paid Smart/Premium/VIP subscriptions, Razorpay payments
+ * and activity history are never touched. Typed confirmation required —
+ * the same string the RPC verifies, so the UI cannot drift from the DB.
+ */
+export async function resetPlatinumCampaign(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const campaignKey = str(formData, 'campaign_key')
+  const confirmPhrase = str(formData, 'confirm_phrase')
+  if (!campaignKey) throw new Error('Invalid campaign')
+  if (confirmPhrase !== campaignKey) {
+    throw new Error(`Type ${campaignKey} to confirm the promotional reset`)
+  }
+  const { admin } = ctx
+  const { data, error } = await admin.rpc('reset_platinum_launch_campaign', {
+    p_confirm: confirmPhrase,
+  })
+  if (error) throw new Error(error.message)
+  await audit(ctx, 'platinum_campaign_reset', 'platinum_launch_campaign', campaignKey, {
+    result: (data ?? {}) as Json,
+  })
+  revalidatePath('/admin/launch-offer')
+  revalidatePath('/profile')
+  revalidatePath('/packages')
+}

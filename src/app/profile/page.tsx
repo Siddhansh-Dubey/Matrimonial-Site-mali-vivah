@@ -19,15 +19,17 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { isSupabaseConfigured } from '@/lib/env'
 import { photoUrl } from '@/lib/profile/photos'
 import { ageFromDate } from '@/lib/profile/profile-schema'
-import { getActiveSubscription } from '@/lib/profile/subscription'
+import { getActiveSubscription, isPromotionalPlatinumSubscription } from '@/lib/profile/subscription'
 import { MomentsRail } from '@/components/moments/moments-rail'
 import { VisibilityBanner } from '@/components/profile/visibility-banner'
+import { PlatinumLaunchCard } from '@/components/profile/platinum-launch-card'
 import { BoostCard } from '@/components/profile/boost-card'
 import { VerificationCard } from '@/components/profile/verification-card'
 import { DeletionCard } from '@/components/profile/deletion-card'
 import type {
   MatrimonyProfile,
   PartnerPreferences,
+  PlatinumLaunchState,
   ProfileViewStats,
   VisibilityReason,
 } from '@/lib/supabase/database.types'
@@ -39,7 +41,7 @@ export const dynamic = 'force-dynamic'
 export default async function ProfileDashboardPage({
   searchParams,
 }: {
-  searchParams?: { published?: string; joined?: string }
+  searchParams?: { published?: string; joined?: string; launch?: string }
 }) {
   if (!isSupabaseConfigured) redirect('/login')
 
@@ -51,6 +53,24 @@ export default async function ProfileDashboardPage({
 
   // Lazy sweep first so an expired plan is reflected truthfully this render.
   await supabase.rpc('sweep_my_membership').then(() => undefined, () => undefined)
+
+  // Platinum Launch Offer — lazy, server-authoritative claim (same pattern as
+  // the sweep above). The RPC decides eligibility entirely in the database
+  // (first-100 slot or one 24h demo once the required profile details are
+  // complete) and is idempotent, so rendering this page after a refresh,
+  // re-login or a missed wizard call can never duplicate or restart a grant.
+  let launchState: PlatinumLaunchState | null = null
+  {
+    const { data, error } = await supabase.rpc('claim_platinum_launch_offer')
+    if (!error && data) {
+      launchState = data as PlatinumLaunchState
+    } else {
+      // Claim unavailable (e.g. migration not applied yet) — fall back to the
+      // read-only state so an existing grant still renders.
+      const read = await supabase.rpc('get_my_platinum_launch')
+      if (!read.error && read.data) launchState = read.data as PlatinumLaunchState
+    }
+  }
 
   const [
     profileRes,
@@ -192,7 +212,19 @@ export default async function ProfileDashboardPage({
           />
         )}
 
-        {subscription && (
+        {/* Platinum Launch Offer (FREE promotional grant) — its own card, so
+            it is never mistaken for a paid package. */}
+        {launchState?.has_grant && (
+          <PlatinumLaunchCard
+            state={launchState}
+            celebrate={searchParams?.launch === 'first100' || searchParams?.launch === 'demo'}
+            className="mb-8"
+          />
+        )}
+
+        {/* Paid membership banner — promotional Platinum rows are rendered by
+            the Platinum card above, never as an "Active package" purchase. */}
+        {subscription && !isPromotionalPlatinumSubscription(subscription) && (
           <div className="mx-auto mb-8 flex max-w-3xl items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
             <Crown className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
             <span>

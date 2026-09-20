@@ -30,6 +30,16 @@ SQL Editor → test register/login.
   interest — payment alone never reveals a phone number.
 - **Payments (Razorpay)** — `/packages` checkout, server-side signature verify +
   webhook, membership auto-activates on capture; expiry self-hides, renewal restores.
+- **Platinum Launch Offer (temporary promotion)** — the first 100 members who
+  complete their profile get a FREE 30-day Platinum membership; after those
+  slots are claimed, every member who completes the required details gets one
+  FREE 24-hour Platinum demo. Granted atomically server-side (own campaign +
+  claim ledger — users are never counted, so production starts at 0/100),
+  idempotent under refresh/retry/races, never a payment, never a downgrade of
+  a paid plan. Member state on `/profile`, explainer on `/packages`, admin
+  stats + enable/disable + typed-confirmation DEVELOPMENT reset at
+  `/admin/launch-offer`. See `docs/platinum-launch-offer.md`. Paid pricing is
+  unchanged: Smart ₹999/90 · Premium ₹2,499/180 · VIP ₹4,999/365.
 - **Daily 5 compatible matches, Mali Moments (24h photo + video, reportable),
   profile boosts (plan quota + à la carte purchase), homepage featured profiles,
   success stories, biodata PDF** (unlocked for the member and for mutual-accepted
@@ -111,6 +121,17 @@ boundaries are the real ones.
   under stacking, refund safety + idempotency (cases A–E), expiry wording, no
   hard-coded 7 days, RLS/grants, account-deletion cascade, and the legacy
   backfill of migration 25 on a pre-existing database.
+* `platinum-launch.test.mjs` — the Platinum Launch Offer (193 checks):
+  atomic first-100 allocation (sequential unique slots, exactly 100, 101st
+  falls through to the demo), pre-existing test accounts consume no slots,
+  one grant per member under repeat calls/profile edits/re-login, paid
+  memberships never shortened/downgraded/delayed, stacking on purchase during
+  a demo, expiry removes capabilities via the existing sweeps, zero Razorpay
+  footprint (promo packages unpurchasable by constraint), RLS/GRANT
+  boundaries (members cannot touch claims/campaign/subscriptions, cannot call
+  the RPCs for others), and the service-role-only typed-confirmation
+  development reset back to 0/100 that preserves users, profiles, paid
+  subscriptions, payments and activity history.
 
 ## Phase 1 acceptance audit (Step 13)
 

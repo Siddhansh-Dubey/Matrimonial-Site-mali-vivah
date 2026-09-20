@@ -3,6 +3,38 @@ import type { Database, SubscriptionRow } from '@/lib/supabase/database.types'
 
 type AnyClient = SupabaseClient<Database>
 
+/* -------------------------------------------------------------------------
+ * Platinum Launch Offer (promotional, never a purchase)
+ *
+ * Promotional Platinum entitlements are ordinary subscription rows granted by
+ * the claim_platinum_launch_offer() RPC — with payment_id NULL and one of the
+ * two NON-purchasable package slugs below (price 0, is_active FALSE). These
+ * helpers let the UI label them as the free launch offer instead of implying
+ * a payment, without touching the paid Smart/Premium/VIP display anywhere.
+ * ---------------------------------------------------------------------- */
+
+/** Package slug of the free 30-day first-100 Platinum grant. */
+export const PLATINUM_FIRST_100_SLUG = 'platinum-launch-30d'
+/** Package slug of the free 24-hour Platinum demo. */
+export const PLATINUM_DEMO_24H_SLUG = 'platinum-demo-24h'
+
+/** True when a subscription row / slug is a Platinum Launch Offer grant. */
+export function isPromotionalPlatinumSlug(slug: string | null | undefined): boolean {
+  return slug === PLATINUM_FIRST_100_SLUG || slug === PLATINUM_DEMO_24H_SLUG
+}
+
+/** True when the subscription row was granted by the launch promotion. */
+export function isPromotionalPlatinumSubscription(sub: SubscriptionRow | null | undefined): boolean {
+  return sub != null && sub.payment_id == null && isPromotionalPlatinumSlug(sub.package_slug)
+}
+
+/** Human label for a promotional grant (never wording that implies payment). */
+export function promotionalPlatinumLabel(slug: string | null | undefined): string {
+  return slug === PLATINUM_DEMO_24H_SLUG
+    ? 'Platinum · Free 24-Hour Demo'
+    : 'Platinum · Launch Offer (30 days free)'
+}
+
 /**
  * True when `userId` holds ANY active, unexpired subscription.
  * Never throws — a missing `subscriptions` table (migration not applied yet)
