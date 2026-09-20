@@ -4,7 +4,7 @@ This folder holds everything the app needs to store **accounts, matrimony
 profiles and the matchmaking flow** (browse, express interest, shortlist,
 profile views) in Supabase.
 
-Thirty-one migrations, run in filename order:
+Thirty-three migrations, run in filename order:
 
 1. `20260910000000_auth_profiles.sql` — login & registration (accounts).
 2. `20260911000000_matrimony_profiles.sql` — the "next flow": the detailed
@@ -174,6 +174,19 @@ operator-managed content, safety + analytics — run after 1–17):
     existing boost-first rule (`boosted DESC, updated_at DESC`) and gains
     `user_id ASC` as the final tie-breaker. Boost still affects ORDER only,
     never visibility. See "Featured profiles & boosted exposure" below.
+33. `20260920120000_daily5_candidate_limit.sql` — **Daily 5 candidate
+    limiting fix (Step 9).** `get_daily_matches()` used to put
+    `LIMIT v_count` on the outer aggregate query — the LIMIT therefore hit
+    the aggregate's single output row (i.e. nothing) and every
+    threshold-passing candidate was returned no matter what
+    `matching_config.daily_count` said. The engine now ranks the surviving
+    candidate ROWS (`score DESC → boost DESC → md5(user_id ‖ current_date)`
+    — the deterministic daily shuffle is unchanged), keeps only the
+    configured `daily_count` of them, THEN aggregates into the JSONB array.
+    An explicit `p_limit` RPC argument may only ask for FEWER matches than
+    configured, never more. Signature, weights, scoring, reasons, threshold
+    semantics and all visibility gates are unchanged; there is still NO
+    padding. See "Daily 5 matching engine" below.
 
 > ⚠️ **Deploy ordering.** `20260915010000_profile_model_family_photo.sql`
 > makes a family photo a hard requirement for publishing. Do not apply it to a live database until the profile wizard's
@@ -614,6 +627,37 @@ never bypass gender/age/city/community/lifestyle filters, the
 boosted state is always computed server-side by `has_active_boost()`
 (`expires_at > now()` — a lapsed boost is not active even before the sweep
 runs).
+
+## Daily 5 matching engine (migrations 14, 33)
+
+`get_daily_matches()` is **rule-based** — component scores, weights and a
+threshold; no machine learning and no AI anywhere:
+
+* **Configuration is data** (`matching_config`, single row `id = 1`, read
+  live on every call through `matching_settings()`): component `weights`
+  (PRD default age 15, location 15, education 10, occupation 10, income 10,
+  community 10, partner_prefs 15, lifestyle 10, behaviour 5), `threshold`
+  (default **90**) and `daily_count` (default **5**, allowed 1–25). The
+  admin panel (`/admin/matching`, service role) edits the row; the engine
+  never hard-codes 5 or 90.
+* **Selection order** (fixed in migration 33): build eligible candidates →
+  score each → drop everyone below `threshold` → rank
+  (`score DESC → boost DESC → md5(user_id ‖ current_date)` — the md5 makes
+  equal-score order deterministic for the whole day) → keep at most
+  `daily_count` candidate rows → aggregate those rows into the JSONB array.
+* **No padding.** `daily_count` is a maximum, not a quota: 2 qualifying
+  candidates return 2, 0 return `[]`. No placeholders, no duplicates, no
+  lowering of the threshold and no filling with weaker profiles.
+* **Eligibility is the standard gates** — `is_profile_public()` (active,
+  complete, both photos, live membership, no admin hold) and `is_blocked()`
+  in either direction, plus the viewer's gender preference. A boosted
+  profile gains ordering among *already qualifying* candidates only — it
+  still has to clear the threshold and every visibility gate.
+* **Free vs paid:** Daily 5 and the compatibility score are visible to free
+  members; paid-only fields (full name, age, height, sub-community, marital
+  status, education, city, state, diet) stay gated behind
+  `has_live_membership(viewer)` as before, and no card carries contact
+  details.
 
 ## Useful admin queries (matchmaking)
 
