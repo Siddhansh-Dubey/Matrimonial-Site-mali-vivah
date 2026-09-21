@@ -45,10 +45,15 @@ export function VerificationCard({
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
 
-  // mobile OTP state
+  // mobile OTP state — every value comes from the server response, never from
+  // an optimistic local guess (see requestOtp below).
   const [otpSent, setOtpSent] = useState(false)
   const [otp, setOtp] = useState('')
   const [cooldown, setCooldown] = useState(0)
+  /** 'real' only when the SMS provider accepted a genuine send. */
+  const [delivery, setDelivery] = useState<'real' | 'simulated' | null>(null)
+  /** Non-fatal caution (e.g. a local test SMS provider): shown in amber. */
+  const [warn, setWarn] = useState<string | null>(null)
 
   useEffect(() => {
     if (cooldown <= 0) return
@@ -103,27 +108,69 @@ export function VerificationCard({
     }
   }
 
+  /** Server response contract of /api/mobile-otp/request. */
+  type OtpRequestResponse = {
+    ok?: boolean
+    error?: string
+    code?: string
+    delivery?: 'real' | 'simulated'
+    cooldown_seconds?: number
+    retry_after_seconds?: number
+    verify_window_minutes?: number
+    max_per_hour?: number
+    mobile_masked?: string
+  }
+
   async function requestOtp() {
     if (!isSupabaseConfigured) return
     setBusy('otp-request')
     setError(null)
     setInfo(null)
+    setWarn(null)
     try {
       const res = await fetch('/api/mobile-otp/request', { method: 'POST' })
-      const body = (await res.json().catch(() => ({}))) as { error?: string }
-      if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as OtpRequestResponse
+
+      if (!res.ok || body.ok !== true) {
+        // The provider refused (misconfiguration, rate limit, invalid number,
+        // outage). Nothing was delivered, so nothing claims otherwise, and the
+        // resend countdown follows the SERVER's number rather than a local 60.
+        setOtpSent(false)
+        setDelivery(null)
+        setCooldown(Math.max(0, Number(body.retry_after_seconds ?? body.cooldown_seconds ?? 0)))
         setError(body.error ?? 'Could not send the code. Please try again.')
         return
       }
+
+      // Truthful success only. `delivery: 'simulated'` means GoTrue's local
+      // test provider accepted the send and NO SMS is coming — the member is
+      // told exactly that instead of being asked to wait for a code.
+      const simulated = body.delivery === 'simulated'
       setOtpSent(true)
       setOtp('')
-      setCooldown(60)
-      setInfo(`Code sent by SMS to ${maskMobile(mobileNumber)}. It expires soon.`)
+      setDelivery(simulated ? 'simulated' : 'real')
+      setCooldown(Math.max(0, Number(body.cooldown_seconds ?? 60)))
+      if (simulated) {
+        setWarn(
+          'This deployment is using Supabase\u2019s local test SMS provider, so no real code was delivered. Mobile verification cannot be completed here \u2014 contact support.'
+        )
+      } else {
+        setInfo(
+          `Code sent by SMS to ${body.mobile_masked ?? maskMobile(mobileNumber)}. It expires in about ${verifyWindowMinutesLabel(body.verify_window_minutes)} \u2014 enter it below.`
+        )
+      }
     } catch {
+      setOtpSent(false)
+      setDelivery(null)
       setError('Could not send the code. Please try again.')
     } finally {
       setBusy(null)
     }
+  }
+
+  function verifyWindowMinutesLabel(value?: number): string {
+    const n = Number(value ?? 10)
+    return `${Number.isFinite(n) && n > 0 ? n : 10} minutes`
   }
 
   async function verifyOtp() {
@@ -139,14 +186,19 @@ export function VerificationCard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ otp }),
       })
-      const body = (await res.json().catch(() => ({}))) as { error?: string }
-      if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string }
+      if (!res.ok || body.code === 'OTP_EXPIRED' || body.code === 'OTP_INVALID') {
+        // Invalid / expired / already-used code: clear the digits, keep the
+        // form open, and show the server's own wording.
+        setOtp('')
         setError(body.error ?? 'That code could not be verified. Please try again.')
         return
       }
       setOtpSent(false)
       setOtp('')
-      setInfo('Mobile number verified!')
+      setDelivery(null)
+      setWarn(null)
+      setInfo('Verification successful — your mobile number is now verified.')
       router.refresh()
     } catch {
       setError('Could not verify the code. Please try again.')
@@ -204,30 +256,50 @@ export function VerificationCard({
                   type="button"
                   onClick={requestOtp}
                   disabled={busy !== null || cooldown > 0}
+                  aria-live="polite"
                   className="btn-secondary inline-flex items-center gap-2 !py-2 text-xs disabled:opacity-50"
                 >
                   {busy === 'otp-request' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Smartphone className="h-4 w-4" />}
-                  {cooldown > 0 ? `Send code (resend in ${cooldown}s)` : 'Send code'}
+                  {busy === 'otp-request'
+                    ? 'Sending…'
+                    : cooldown > 0
+                      ? `Resend SMS code in ${cooldown}s`
+                      : 'Send SMS code'}
                 </button>
               ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    inputMode="numeric"
-                    placeholder="6-digit code"
-                    aria-label="OTP code"
-                    className="input w-32 !py-2 text-sm tracking-[0.3em]"
-                  />
-                  <button
-                    type="button"
-                    onClick={verifyOtp}
-                    disabled={busy !== null || otp.length !== 6}
-                    className="btn-primary !py-2 text-xs disabled:opacity-50"
-                  >
-                    {busy === 'otp-verify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                    Verify
-                  </button>
+                <div className="space-y-2">
+                  {delivery === 'simulated' && (
+                    <p className="rounded-lg bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-800">
+                      Test SMS provider — no real message was delivered.
+                    </p>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={otp}
+                      onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      inputMode="numeric"
+                      placeholder="6-digit code"
+                      aria-label="OTP code"
+                      className="input w-32 !py-2 text-sm tracking-[0.3em]"
+                    />
+                    <button
+                      type="button"
+                      onClick={verifyOtp}
+                      disabled={busy !== null || otp.length !== 6}
+                      className="btn-primary !py-2 text-xs disabled:opacity-50"
+                    >
+                      {busy === 'otp-verify' ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                      {busy === 'otp-verify' ? 'Verifying…' : 'Verify'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={requestOtp}
+                      disabled={busy !== null || cooldown > 0}
+                      className="btn-secondary !py-2 text-xs disabled:opacity-50"
+                    >
+                      {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend SMS code'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -316,7 +388,12 @@ export function VerificationCard({
         </div>
 
         {info && <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">{info}</p>}
-        {error && <p role="alert" className="text-xs font-semibold text-brand-700">{error}</p>}
+        {warn && <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{warn}</p>}
+        {error && (
+          <p role="alert" className="rounded-xl bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-800">
+            {error}
+          </p>
+        )}
       </div>
     </div>
   )

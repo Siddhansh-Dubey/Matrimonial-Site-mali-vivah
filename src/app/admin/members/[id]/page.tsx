@@ -14,6 +14,7 @@ import {
   Pencil,
   Rocket,
   ShieldAlert,
+  ShieldX,
   Star,
   Trash2,
   User,
@@ -23,6 +24,7 @@ import { requireAdminPage } from '@/lib/admin/server'
 import { loadMemberDetail } from '@/lib/admin/member-detail'
 import {
   PROFILE_STATUS_LABELS,
+  REVOCATION_REASONS,
   VISIBILITY_REASON_LABELS,
   fmtDate,
   label,
@@ -40,6 +42,7 @@ import {
   manualActivate,
   reactivateMember,
   rejectMemberProfile,
+  revokeMembership,
   setFeatured,
   setProfileHidden,
   setProfileSuspended,
@@ -124,6 +127,32 @@ export default async function AdminMemberPage({ params, searchParams }: Props) {
     .select('id, name, slug, duration_days')
     .eq('is_active', true)
     .order('sort_order')
+
+  // --- Membership revocation ---------------------------------------------
+  // The authoritative entitlement table is public.subscriptions. A LIVE row is
+  // active and unexpired (the same rule has_live_membership() applies). Free
+  // Platinum launch grants are ordinary subscription rows too, so they are
+  // separated by their fixed promotional slugs — revoking a PAID plan must
+  // never confiscate the launch offer.
+  const PROMOTIONAL_SLUGS = ['platinum-launch-30d', 'platinum-demo-24h']
+  const nowIso = new Date().toISOString()
+  const liveSubs = d.subscriptions.filter(
+    (sub) => sub.status === 'active' && sub.expires_at > nowIso
+  )
+  const promotionalSubs = liveSubs.filter((sub) => PROMOTIONAL_SLUGS.includes(sub.package_slug ?? ''))
+  const revocableSubs = liveSubs.filter((sub) => !PROMOTIONAL_SLUGS.includes(sub.package_slug ?? ''))
+  // The RPC targets the longest-running live paid entitlement by default, so
+  // the confirmation quotes exactly that one.
+  const revokeTarget = revocableSubs[0] ?? null
+  const keepsAccessAfterRevocation = revocableSubs.length > 1 || promotionalSubs.length > 0
+  const revokeTargetPayment = revokeTarget?.payment_id
+    ? d.payments.find((pay) => pay.id === revokeTarget.payment_id) ?? null
+    : null
+  const revokePaymentLabel = !revokeTarget?.payment_id
+    ? 'Manual/admin activation · no payment row'
+    : revokeTargetPayment
+      ? `Razorpay-backed · ₹${revokeTargetPayment.amount_inr.toLocaleString('en-IN')} · ${revokeTargetPayment.status} (record preserved)`
+      : 'Razorpay-backed · payment record preserved'
 
   const profilePhotos = d.photos.filter((p) => p.kind === 'profile_photo')
   const familyPhoto = d.photos.find((p) => p.kind === 'family_photo') ?? null
@@ -467,6 +496,96 @@ export default async function AdminMemberPage({ params, searchParams }: Props) {
                     {live ? 'Extend membership' : 'Mark paid'}
                   </ConfirmButton>
                 </form>
+              )}
+              {revocableSubs.length > 0 && revokeTarget && (
+                <form
+                  action={revokeMembership}
+                  className="space-y-2 rounded-xl border border-brand-200 bg-brand-50/50 p-3"
+                >
+                  {/* The action needs both: user_id identifies the member it is
+                      authorised against server-side, and return_to is where the
+                      ok/error notice is redirected to. Without them the action
+                      throws "Invalid member" before it ever reaches the RPC. */}
+                  <input type="hidden" name="user_id" value={person.id} />
+                  <input type="hidden" name="return_to" value={returnTo} />
+                  <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-brand-800">
+                    <ShieldX className="h-3.5 w-3.5" aria-hidden /> Revoke membership
+                  </p>
+                  <dl className="grid gap-1 text-xs text-stone-700 sm:grid-cols-[7rem_1fr]">
+                    <dt className="font-semibold text-stone-500">Package</dt>
+                    <dd>{revokeTarget.package_slug ?? 'package'}{state?.membership?.tier ? ` · ${state.membership.tier}` : ''}</dd>
+                    <dt className="font-semibold text-stone-500">Status</dt>
+                    <dd>Active</dd>
+                    <dt className="font-semibold text-stone-500">Expires</dt>
+                    <dd>{fmtDate(revokeTarget.expires_at)}</dd>
+                    <dt className="font-semibold text-stone-500">Payment</dt>
+                    <dd>{revokePaymentLabel}</dd>
+                  </dl>
+                  {revocableSubs.length > 1 && (
+                    <label className="block text-xs font-semibold text-stone-500">
+                      Which entitlement
+                      <select name="subscription_id" defaultValue={String(revokeTarget.id)} className={`${input} mt-1`}>
+                        {revocableSubs.map((sub) => (
+                          <option key={sub.id} value={sub.id}>
+                            {sub.package_slug ?? 'package'} · expires {fmtDate(sub.expires_at)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {promotionalSubs.length > 0 && (
+                    <p className="text-xs text-stone-600">
+                      This member also holds a free Platinum launch grant (
+                      {promotionalSubs.map((sub) => sub.package_slug).join(', ')}) — it is NOT revoked and keeps
+                      their paid access until it ends.
+                    </p>
+                  )}
+                  <label className="block text-xs font-semibold text-stone-500">
+                    Reason (required — kept in the audit log)
+                    <select name="reason" required className={`${input} mt-1`}>
+                      <option value="" disabled>
+                        Choose a reason…
+                      </option>
+                      {REVOCATION_REASONS.map((r) => (
+                        <option key={r.value} value={r.value}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-xs font-semibold text-stone-500">
+                    Admin note (optional — audit log only, never shown to the member)
+                    <input
+                      name="note"
+                      maxLength={300}
+                      placeholder="e.g. refund processed manually on 12 Sep, receipt no. 4471"
+                      className={`${input} mt-1`}
+                    />
+                  </label>
+                  <ConfirmButton
+                    message={`Revoke ${revokeTarget.package_slug ?? 'this'} membership?\n\nThis removes the member's active paid membership and paid access${
+                      keepsAccessAfterRevocation
+                        ? ' from that entitlement — they keep access from another live entitlement.'
+                        : ', and their profile leaves Browse, Search, matches and Express Interest.'
+                    }\n\nThe historical payment record will NOT be deleted: the Razorpay order id, payment id and amount stay exactly as captured. This is not a refund — use Admin → Payments for that.`}
+                    className="rounded-full bg-brand-700 px-4 py-2 text-xs font-bold text-white hover:bg-brand-800"
+                  >
+                    <ShieldX className="mr-1 inline h-3 w-3" /> Revoke membership
+                  </ConfirmButton>
+                  <p className="text-[11px] text-stone-500">
+                    Revocation cancels the entitlement only. Refunds stay a separate action under{' '}
+                    <Link href="/admin/payments" className="font-semibold text-maroon hover:underline">
+                      Admin → Payments
+                    </Link>
+                    .
+                  </p>
+                </form>
+              )}
+              {live && revocableSubs.length === 0 && promotionalSubs.length > 0 && (
+                <p className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-600">
+                  The only live entitlement is a free Platinum launch grant — there is no paid membership to
+                  revoke. Promotional grants expire on their own; reset the campaign under Admin → Launch offer.
+                </p>
               )}
               <form action={adminGrantBoost} className="flex flex-wrap items-center gap-2">
                 <input type="hidden" name="user_id" value={person.id} />

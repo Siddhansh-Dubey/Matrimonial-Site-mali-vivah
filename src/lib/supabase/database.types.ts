@@ -1131,6 +1131,10 @@ export type Database = {
           mobile: string
           requested_at: string
           verified_at: string | null
+          /** 'requested' | 'sent' | 'failed' — written only by record_mobile_otp_delivery(). */
+          delivery_status: 'requested' | 'sent' | 'failed'
+          failure_code: string | null
+          provider: string | null
         }
         Insert: {
           id?: never
@@ -1138,6 +1142,9 @@ export type Database = {
           mobile: string
           requested_at?: string
           verified_at?: string | null
+          delivery_status?: 'requested' | 'sent' | 'failed'
+          failure_code?: string | null
+          provider?: string | null
         }
         Update: {
           id?: never
@@ -1145,6 +1152,9 @@ export type Database = {
           mobile?: string
           requested_at?: string
           verified_at?: string | null
+          delivery_status?: 'requested' | 'sent' | 'failed'
+          failure_code?: string | null
+          provider?: string | null
         }
         Relationships: [
           {
@@ -1869,7 +1879,28 @@ export type Database = {
         Args: { p_user_id: string; p_granted_by?: string | null }
         Returns: Json
       }
+      /**
+       * Rate-limited OTP request gate (60s cooldown, 5 per rolling hour) for
+       * the caller's OWN stored mobile. Returns { ok, request_id,
+       * mobile_masked, cooldown_seconds, verify_window_minutes, max_per_hour,
+       * requests_last_hour } — it never returns an OTP.
+       */
       request_mobile_otp: { Args: Record<string, never>; Returns: Json }
+      /**
+       * Service-role-only diagnostic writer: records whether GoTrue accepted
+       * ('sent') or refused ('failed') the SMS for one request_mobile_otp()
+       * attempt. Can never set verified_at or profiles.mobile_verified.
+       */
+      record_mobile_otp_delivery: {
+        Args: {
+          p_request_id: number
+          p_user_id: string
+          p_status: 'sent' | 'failed'
+          p_failure_code?: string | null
+          p_provider?: string | null
+        }
+        Returns: Json
+      }
       complete_mobile_otp_verification: { Args: { p_user_id: string; p_mobile: string }; Returns: Json }
       report_moment: {
         Args: {
@@ -1936,7 +1967,31 @@ export type Database = {
       log_account_deletion: { Args: { p_reason?: string | null }; Returns: number | null }
       is_profile_completed: { Args: { p_user_id: string }; Returns: boolean }
       canonical_activity_events: { Args: Record<string, never>; Returns: string[] }
-      admin_analytics: { Args: { p_days?: number | null }; Returns: Json }
+      /**
+       * Admin-only analytics. Authorised by admin_assert_actor(p_admin_id) — the
+       * single authoritative admin check — so the service-role admin panel
+       * (which has no auth.uid()) must name the acting admin explicitly.
+       */
+      admin_analytics: {
+        Args: { p_days?: number | null; p_admin_id?: string | null }
+        Returns: Json
+      }
+      /**
+       * Admin-only revocation of ONE active paid membership entitlement.
+       * Never touches the payment row (Razorpay order/payment id, amount and
+       * status stay exactly as captured) and never touches unrelated
+       * entitlements (Platinum promotional subscriptions, boosts, featured).
+       */
+      admin_revoke_membership: {
+        Args: {
+          p_admin_id: string
+          p_user_id: string
+          p_reason?: string | null
+          p_note?: string | null
+          p_subscription_id?: number | null
+        }
+        Returns: Json
+      }
       // ---- Step 7 · admin member management (service role only) ----
       /** Truthful snapshot of one member (status, publicity, hold, suspension, membership…). */
       admin_member_state: { Args: { p_user_id: string }; Returns: Json }

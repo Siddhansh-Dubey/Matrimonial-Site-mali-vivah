@@ -5,11 +5,14 @@
   "description": "Mali Vivah database test harness \u2014 runs every supabase/migrations/*.sql file in an in-process PGlite Postgres (no Supabase project needed) and asserts behaviour. Kept OUTSIDE the Next.js deploy (own package.json).",
   "type": "module",
   "scripts": {
-    "test": "node run.mjs",
-    "test:boosts": "node run.mjs boosts",
-    "test:profile-views": "node run.mjs profile-views",
-    "test:daily5": "node run.mjs daily5",
-    "test:platinum-launch": "node run.mjs platinum-launch"
+    "test": "node --experimental-strip-types run.mjs",
+    "test:boosts": "node --experimental-strip-types run.mjs boosts",
+    "test:profile-views": "node --experimental-strip-types run.mjs profile-views",
+    "test:daily5": "node --experimental-strip-types run.mjs daily5",
+    "test:platinum-launch": "node --experimental-strip-types run.mjs platinum-launch",
+    "test:mobile-otp": "node --experimental-strip-types run.mjs mobile-otp",
+    "test:admin-analytics": "node --experimental-strip-types run.mjs admin-analytics",
+    "test:membership-revocation": "node --experimental-strip-types run.mjs membership-revocation"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.3.0"
