@@ -5,6 +5,7 @@ import {
   Banknote,
   Calendar,
   Eye,
+  EyeOff,
   FileWarning,
   Flame,
   Heart,
@@ -50,6 +51,7 @@ type AnalyticsPayload = {
     user_id: string | null
     actor_name: string | null
   }[]
+  packages: { package_slug: string; active: number; revenue_total: number }[]
 }
 
 const EVENT_LABELS: Record<string, string> = {
@@ -93,6 +95,25 @@ const EVENT_LABELS: Record<string, string> = {
   story_submitted: 'Success story submitted',
   block_created: 'Member blocked',
   block_removed: 'Member unblocked',
+  mobile_otp_verified: 'Mobile OTP verified',
+  admin_member_approved: 'Admin approved profile',
+  admin_member_rejected: 'Admin sent profile back',
+  admin_member_edited: 'Admin edited member profile',
+  admin_member_suspended: 'Admin suspended member',
+  admin_member_unsuspended: 'Admin lifted suspension',
+  admin_member_hidden: 'Admin placed member on hold',
+  admin_member_reactivated: 'Admin reactivated member',
+  admin_member_deleted: 'Admin deleted member',
+  admin_member_verified: 'Admin granted verified badge',
+  admin_member_unverified: 'Admin removed verified badge',
+  admin_member_featured: 'Admin featured member',
+  admin_member_unfeatured: 'Admin un-featured member',
+  admin_member_photo_removed: 'Admin removed a photo',
+  admin_manual_membership_activation: 'Admin activated a membership manually',
+  admin_membership_revoked: 'Admin revoked a membership (payment preserved)',
+  platinum_first_100_granted: 'Platinum launch offer granted (first 100)',
+  platinum_demo_24h_granted: 'Platinum 24-hour demo granted',
+  platinum_promotion_expired: 'Platinum promotion expired',
 }
 
 function formatTs(ts: string): string {
@@ -201,16 +222,24 @@ export default async function AdminAnalyticsPage({
 }: {
   searchParams: SearchParams
 }) {
-  await requireAdminPage()
+  const { admin, userId: adminId } = await requireAdminPage()
   const days = clampDays(searchParams.days ?? null)
 
-  // Fetch analytics via the service-role RPC (this runs server-side, as the
-  // admin, via the service-role client created by requireAdminPage which uses
-  // createAdminClient → bypasses RLS, calls the SECURITY DEFINER RPC).
-  const { createAdminClient } = await import('@/lib/supabase/admin')
-  const admin = createAdminClient()
+  // ONE authoritative admin check. `requireAdminPage()` above resolved the
+  // caller as a signed-in `profiles.is_admin` member and returned BOTH that
+  // member's id and the service-role client. The RPC is invoked with the
+  // service role (so the SECURITY DEFINER body can read every business table
+  // regardless of RLS) and authorised by `admin_assert_actor(p_admin_id)`
+  // inside `admin_analytics()` — exactly like every other admin RPC.
+  //
+  // The previous version called `admin.rpc('admin_analytics', { p_days })`
+  // without p_admin_id: a service-role request carries no user JWT, so
+  // `auth.uid()` was NULL, `is_admin()` was FALSE and the RPC rejected the
+  // very admin the page had already authorised ("admin_analytics: admin
+  // only"). The identity is now passed explicitly — never taken from the
+  // browser, never hard-coded.
   const { data, error } = await admin
-    .rpc('admin_analytics', { p_days: days })
+    .rpc('admin_analytics', { p_days: days, p_admin_id: adminId })
     .maybeSingle()
 
   const payload: AnalyticsPayload | null = (data as unknown as AnalyticsPayload) ?? null
@@ -224,6 +253,9 @@ export default async function AdminAnalyticsPage({
       </div>
     )
   }
+
+  /** Every KPI renders, including 0 — an empty metric is data, not a reason to hide the page. */
+  const kpi = (key: string): number => Number(payload.kpis?.[key] ?? 0)
 
   return (
     <div className="space-y-8">
@@ -257,38 +289,64 @@ export default async function AdminAnalyticsPage({
 
       {/* ---- KPI cards ---- */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-        <KpiCard label="Total members" value={String(payload.kpis.total_members)} icon={Users} />
-        <KpiCard label={`New · ${payload.window_days}d`} value={String(payload.kpis.new_members)} icon={TrendingUp} />
-        <KpiCard label="Signups today" value={String(payload.kpis.signups_today)} icon={TrendingUp} />
-        <KpiCard label="Live profiles" value={String(payload.kpis.live_profiles)} icon={HeartHandshake} />
-        <KpiCard label="Published · window" value={String(payload.kpis.published_profiles)} icon={Heart} />
-        <KpiCard label="Live subscriptions" value={String(payload.kpis.live_subscriptions)} icon={Activity} />
-        <KpiCard label="Subs activated" value={String(payload.kpis.subscriptions_activated)} icon={Activity} />
-        <KpiCard label="Subs renewed" value={String(payload.kpis.subscriptions_renewed)} icon={TrendingUp} />
-        <KpiCard label="Subs expired" value={String(payload.kpis.subscriptions_expired)} icon={Activity} />
-        <KpiCard label="Active boosts" value={String(payload.kpis.active_boosts)} icon={ShieldBan} />
-        <KpiCard label="Boosts activated" value={String(payload.kpis.boosts_activated)} icon={ShieldBan} />
-        <KpiCard label={`Revenue · ${payload.window_days}d`} value={inr(payload.kpis.revenue_window)} icon={Banknote} />
-        <KpiCard label="Revenue (all time)" value={inr(payload.kpis.revenue_total)} icon={Banknote} />
-        <KpiCard label="Payments captured" value={String(payload.kpis.payments_captured)} icon={Banknote} />
-        <KpiCard label="Payments failed" value={String(payload.kpis.payments_failed)} icon={Banknote} />
-        <KpiCard label="Payments refunded" value={String(payload.kpis.payments_refunded)} icon={Banknote} />
-        <KpiCard label="Searches" value={String(payload.kpis.searches)} icon={Search} />
-        <KpiCard label="Interests sent" value={String(payload.kpis.interests_sent)} icon={Heart} />
-        <KpiCard label="Interests accepted" value={String(payload.kpis.interests_accepted)} icon={Heart} />
-        <KpiCard label="Interests declined" value={String(payload.kpis.interests_declined)} icon={Heart} />
-        <KpiCard label="Mutual connections" value={String(payload.kpis.mutual_connections)} icon={HeartHandshake} />
-        <KpiCard label="Messages" value={String(payload.kpis.messages)} icon={MessagesSquare} />
-        <KpiCard label="Profile views" value={String(payload.kpis.profile_views)} icon={Eye} />
-        <KpiCard label="Contact reveals" value={String(payload.kpis.contact_reveals)} icon={Eye} />
-        <KpiCard label="Moments posted" value={String(payload.kpis.moments_posted)} icon={Flame} />
-        <KpiCard label="Live moments" value={String(payload.kpis.live_moments)} icon={Flame} />
-        <KpiCard label="Moments reported" value={String(payload.kpis.moments_reported)} icon={FileWarning} />
-        <KpiCard label="Pending verifications" value={String(payload.kpis.pending_verifications)} icon={BadgeCheck} />
-        <KpiCard label="Verifications approved" value={String(payload.kpis.verifications_approved)} icon={BadgeCheck} />
-        <KpiCard label="Verifications rejected" value={String(payload.kpis.verifications_rejected)} icon={BadgeCheck} />
-        <KpiCard label="Open reports" value={String(payload.kpis.open_reports)} icon={FileWarning} />
+        <KpiCard label="Total members" value={String(kpi('total_members'))} icon={Users} />
+        <KpiCard label={`New · ${payload.window_days}d`} value={String(kpi('new_members'))} icon={TrendingUp} />
+        <KpiCard label="Signups today" value={String(kpi('signups_today'))} icon={TrendingUp} />
+        <KpiCard label="Paid members" value={String(kpi('paid_members'))} icon={Banknote} />
+        <KpiCard label="Free members" value={String(kpi('free_members'))} icon={Users} />
+        <KpiCard label="Live profiles" value={String(kpi('live_profiles'))} icon={HeartHandshake} />
+        <KpiCard label="Hidden (free) profiles" value={String(kpi('hidden_profiles'))} icon={EyeOff} />
+        <KpiCard label="Verified profiles" value={String(kpi('verified_profiles'))} icon={BadgeCheck} />
+        <KpiCard label="Published · window" value={String(kpi('published_profiles'))} icon={Heart} />
+        <KpiCard label="Live subscriptions" value={String(kpi('live_subscriptions'))} icon={Activity} />
+        <KpiCard label="Expiring ≤ 7 days" value={String(kpi('expiring_subscriptions'))} icon={Calendar} />
+        <KpiCard label="Live promo (Platinum)" value={String(kpi('live_promotional_subscriptions'))} icon={Flame} />
+        <KpiCard label="Subs activated" value={String(kpi('subscriptions_activated'))} icon={Activity} />
+        <KpiCard label="Subs renewed" value={String(kpi('subscriptions_renewed'))} icon={TrendingUp} />
+        <KpiCard label="Subs expired" value={String(kpi('subscriptions_expired'))} icon={Activity} />
+        <KpiCard label="Active boosts" value={String(kpi('active_boosts'))} icon={ShieldBan} />
+        <KpiCard label="Boosts activated" value={String(kpi('boosts_activated'))} icon={ShieldBan} />
+        <KpiCard label={`Revenue · ${payload.window_days}d`} value={inr(kpi('revenue_window'))} icon={Banknote} />
+        <KpiCard label="Revenue (all time)" value={inr(kpi('revenue_total'))} icon={Banknote} />
+        <KpiCard label="Payments captured" value={String(kpi('payments_captured'))} icon={Banknote} />
+        <KpiCard label="Payments failed" value={String(kpi('payments_failed'))} icon={Banknote} />
+        <KpiCard label="Payments refunded" value={String(kpi('payments_refunded'))} icon={Banknote} />
+        <KpiCard label="Searches" value={String(kpi('searches'))} icon={Search} />
+        <KpiCard label="Interests sent" value={String(kpi('interests_sent'))} icon={Heart} />
+        <KpiCard label="Interests accepted" value={String(kpi('interests_accepted'))} icon={Heart} />
+        <KpiCard label="Interests declined" value={String(kpi('interests_declined'))} icon={Heart} />
+        <KpiCard label="Mutual connections" value={String(kpi('mutual_connections'))} icon={HeartHandshake} />
+        <KpiCard label="Messages" value={String(kpi('messages'))} icon={MessagesSquare} />
+        <KpiCard label="Profile views" value={String(kpi('profile_views'))} icon={Eye} />
+        <KpiCard label="Contact reveals" value={String(kpi('contact_reveals'))} icon={Eye} />
+        <KpiCard label="Moments posted" value={String(kpi('moments_posted'))} icon={Flame} />
+        <KpiCard label="Live moments" value={String(kpi('live_moments'))} icon={Flame} />
+        <KpiCard label="Moments reported" value={String(kpi('moments_reported'))} icon={FileWarning} />
+        <KpiCard label="Pending verifications" value={String(kpi('pending_verifications'))} icon={BadgeCheck} />
+        <KpiCard label="Verifications approved" value={String(kpi('verifications_approved'))} icon={BadgeCheck} />
+        <KpiCard label="Verifications rejected" value={String(kpi('verifications_rejected'))} icon={BadgeCheck} />
+        <KpiCard label="Open reports" value={String(kpi('open_reports'))} icon={FileWarning} />
+        <KpiCard label={`Reports · ${payload.window_days}d`} value={String(kpi('reports_window'))} icon={FileWarning} />
+        <KpiCard label="Reports resolved" value={String(kpi('reports_resolved'))} icon={FileWarning} />
       </div>
+
+      {/* ---- Live package mix ---- */}
+      <SectionCard title="Active packages" right="live subscriptions · all-time captured revenue">
+        {payload.packages.length === 0 ? (
+          <p className="text-sm text-stone-500">No live subscriptions — every plan count is 0.</p>
+        ) : (
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {payload.packages.map((pk) => (
+              <li key={pk.package_slug} className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2">
+                <p className="truncate text-sm font-semibold text-stone-800">{pk.package_slug}</p>
+                <p className="mt-0.5 text-xs text-stone-500">
+                  {pk.active} active · {inr(pk.revenue_total)} captured
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </SectionCard>
 
       {/* ---- Charts ---- */}
       <div className="grid gap-6 lg:grid-cols-2">

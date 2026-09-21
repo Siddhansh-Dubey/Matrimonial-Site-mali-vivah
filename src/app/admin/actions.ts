@@ -11,7 +11,11 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { audit, requireAdminAction, type AdminContext } from '@/lib/admin/server'
-import { VISIBILITY_REASON_LABELS, friendlyAdminError } from '@/lib/admin/members'
+import {
+  VISIBILITY_REASON_LABELS,
+  friendlyAdminError,
+  isRevocationReason,
+} from '@/lib/admin/members'
 import {
   aboutSchema,
   educationSchema,
@@ -390,6 +394,99 @@ export async function refundPayment(formData: FormData) {
   if (error) throw new Error(error.message)
   await audit(ctx, 'payment_refund', 'payment', paymentId, { result: data })
   revalidatePath('/admin/payments')
+}
+
+// ---------------------------------------------------------------------------
+// Membership REVOCATION — entitlement only, never money
+//
+// The selectable reasons live in `@/lib/admin/members` (REVOCATION_REASONS)
+// because a `'use server'` module may only export async functions; the database
+// re-validates the value inside admin_revoke_membership() and is the authority.
+// ---------------------------------------------------------------------------
+
+/**
+ * Revoke ONE active paid membership (admin_revoke_membership).
+ *
+ * Distinct from `refundPayment` above and deliberately so:
+ *   • refundPayment → refund_membership(payment_id): a FINANCIAL reversal.
+ *     payments.status becomes 'refunded'. Only for money that really moved.
+ *   • this action   → admin_revoke_membership(...): an ENTITLEMENT reversal.
+ *     The payments row is never written: razorpay_order_id,
+ *     razorpay_payment_id, amount_inr, currency, status ('captured') and
+ *     created_at all survive untouched, and are copied into admin_audit_log
+ *     so the money trail stays readable after the membership is gone.
+ *
+ * The RPC is service-role only and authorised by admin_assert_actor(p_admin_id)
+ * inside the database — the browser supplies a member id, a reason and an
+ * optional note, and NONE of them is trusted as authority: the target
+ * subscription is looked up server-side, must belong to that member, and
+ * promotional Platinum grants are excluded. Another live entitlement (Premium
+ * + Platinum, a stacked renewal, a manual activation) keeps the member paid
+ * and visible; only when nothing live remains does the profile leave the
+ * directory, landing on 'expired' exactly like the existing expiry sweeps.
+ * Boosts and featured status are never touched.
+ */
+export async function revokeMembership(formData: FormData) {
+  const ctx = await requireAdminAction()
+  const targetUserId = requireUuid(str(formData, 'user_id'))
+  const reason = str(formData, 'reason').toLowerCase()
+  const note = str(formData, 'note')
+  const subscriptionRaw = str(formData, 'subscription_id')
+  const subscriptionId = subscriptionRaw === '' ? null : Number(subscriptionRaw)
+  if (subscriptionId !== null && (!Number.isInteger(subscriptionId) || subscriptionId <= 0)) {
+    throw new Error('Invalid subscription')
+  }
+  if (!isRevocationReason(reason)) {
+    throw new Error('REASON_REQUIRED: choose why the membership is being revoked')
+  }
+
+  await memberAction(formData, targetUserId, async () => {
+    const { data, error } = await ctx.admin.rpc('admin_revoke_membership', {
+      p_admin_id: ctx.userId,
+      p_user_id: targetUserId,
+      p_reason: reason,
+      p_note: note || null,
+      p_subscription_id: subscriptionId,
+    })
+    if (error) throw new Error(error.message)
+
+    const r = (data ?? {}) as RpcResult
+    const status = typeof r.status === 'string' ? r.status : ''
+    if (status === 'no_active_paid_membership') {
+      // Idempotent replay / nothing paid to revoke. Say so plainly instead of
+      // pretending something changed.
+      throw new Error(
+        r.promotional_live === true
+          ? 'No active PAID membership to revoke — this member only holds a free Platinum launch grant, which is left untouched.'
+          : 'No active paid membership to revoke.'
+      )
+    }
+    if (status === 'already_revoked') {
+      throw new Error('That membership was already revoked — nothing changed.')
+    }
+
+    // The RPC writes its own admin_audit_log row (with the preserved payment
+    // identity) and its own activity event; this second row keeps the
+    // TypeScript-side audit trail consistent with every other admin action.
+    await audit(ctx, 'membership_revoked', 'user', targetUserId, {
+      subscription_id: r.subscription_id ?? null,
+      package_slug: r.package_slug ?? null,
+      tier: r.tier ?? null,
+      reason,
+      note: note || null,
+      payment_id: r.payment_id ?? null,
+      razorpay_order_id: r.razorpay_order_id ?? null,
+      razorpay_payment_id: r.razorpay_payment_id ?? null,
+      amount_inr: r.amount_inr ?? null,
+      payment_untouched: true,
+      live_membership_after: r.live_membership_after ?? null,
+      profile_status_after: r.profile_status_after ?? null,
+    })
+
+    revalidatePath('/admin/payments')
+    revalidatePath('/admin')
+    return r.live_membership_after === true ? 'revoked_kept_access' : 'revoked'
+  })
 }
 
 // ---------------------------------------------------------------------------

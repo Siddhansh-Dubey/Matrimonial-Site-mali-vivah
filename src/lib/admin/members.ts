@@ -185,6 +185,15 @@ const FRIENDLY: { test: RegExp; text: (rest: string) => string }[] = [
   { test: /^PROFILE_INCOMPLETE/, text: (rest) => `Profile is incomplete — missing: ${rest || 'required details'}.` },
   { test: /^MEMBERSHIP_EXPIRED/, text: (rest) => rest || 'The membership has expired.' },
   { test: /^PAID_MEMBERSHIP_REQUIRED/, text: () => 'This member needs a paid membership for that.' },
+  { test: /^ADMIN_SELF_ACTION/, text: (rest) => rest || 'You cannot perform that action on your own account.' },
+  { test: /^REASON_REQUIRED/, text: (rest) => rest || 'Choose a reason before revoking the membership.' },
+  { test: /^INVALID_REASON/, text: () => 'That is not a recognised revocation reason.' },
+  {
+    test: /^PROMOTIONAL_ENTITLEMENT/,
+    text: () =>
+      'Promotional Platinum launch grants are free, not paid memberships — let them expire, or reset the campaign under Admin → Launch offer.',
+  },
+  { test: /^SUBSCRIPTION_NOT_FOUND/, text: () => 'That subscription does not belong to this member.' },
   { test: /^COMMUNITY_(MISMATCH|INACTIVE|INVALID)/, text: (rest) => rest || 'Community selection is invalid.' },
 ]
 
@@ -213,6 +222,32 @@ export function friendlyAdminError(message: string): string {
   return raw.length > 300 ? `${raw.slice(0, 297)}…` : raw
 }
 
+/**
+ * Reasons an admin may revoke a membership.
+ *
+ * Lives HERE rather than in `src/app/admin/actions.ts` because that file is a
+ * `'use server'` module: Next.js only allows it to export async functions, so a
+ * shared constant must sit in a plain module both the action and the member
+ * detail page can import. The database re-validates the chosen value inside
+ * `admin_revoke_membership()` — this list drives the UI and gives the action an
+ * early, friendly refusal; it is never the authority.
+ */
+export const REVOCATION_REASONS = [
+  { value: 'refund', label: 'Refund (money returned outside Razorpay)' },
+  { value: 'fraud', label: 'Fraud / suspicious payment' },
+  { value: 'incorrect_activation', label: 'Incorrect activation' },
+  { value: 'support_action', label: 'Support action' },
+  { value: 'manual_correction', label: 'Manual correction' },
+  { value: 'other', label: 'Other' },
+] as const
+
+export type RevocationReason = (typeof REVOCATION_REASONS)[number]['value']
+
+/** Is `value` one of the reasons an admin is allowed to revoke with? */
+export function isRevocationReason(value: string): value is RevocationReason {
+  return REVOCATION_REASONS.some((r) => r.value === value)
+}
+
 /** Short human text for the notice codes the actions redirect with. */
 export const NOTICE_TEXT: Record<string, string> = {
   suspended: 'Profile suspended. It is no longer discoverable anywhere; membership data is untouched.',
@@ -230,6 +265,10 @@ export const NOTICE_TEXT: Record<string, string> = {
   featured: 'Profile featured on the homepage.',
   unfeatured: 'Profile removed from the homepage.',
   activated: 'Membership activated through the authoritative activation machinery.',
+  revoked:
+    'Membership revoked. The paid entitlement is gone and the profile left the directory; the payment record (Razorpay order, payment id and amount) is untouched.',
+  revoked_kept_access:
+    'That membership was revoked, but the member still holds another live entitlement — paid access and visibility continue until it ends. The payment record is untouched.',
   boosted: 'Support boost granted for the configured duration.',
   photo_removed: 'Photo removed. The member has been notified.',
   deleted: 'Member account permanently deleted.',

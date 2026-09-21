@@ -17,7 +17,7 @@ export type MemberDetail = {
   subCommunityName: string | null
   photos: { id: number; storage_path: string; kind: 'profile_photo' | 'family_photo'; is_primary: boolean; sort_order: number }[]
   state: AdminMemberState | null
-  subscriptions: { id: number; package_slug: string | null; status: string; started_at: string; expires_at: string }[]
+  subscriptions: { id: number; package_slug: string | null; status: string; started_at: string; expires_at: string; payment_id: string | null }[]
   payments: { id: string; kind: 'package' | 'boost'; amount_inr: number; status: string; package_slug: string | null; created_at: string }[]
   verifications: { id: string; type: string; status: string; created_at: string; reviewed_at: string | null }[]
   featured: { position: number; created_at: string } | null
@@ -93,7 +93,10 @@ export async function loadMemberDetail(admin: AdminClient, userId: string): Prom
     admin.rpc('admin_member_state', { p_user_id: userId }),
     admin
       .from('subscriptions')
-      .select('id, package_slug, status, started_at, expires_at')
+      // payment_id tells the revocation UI apart from a free Platinum launch
+      // grant without a second query — a payment-backed row is a paid
+      // membership, a NULL one is either a manual activation or a promotion.
+      .select('id, package_slug, status, started_at, expires_at, payment_id')
       .eq('user_id', userId)
       .order('expires_at', { ascending: false })
       .limit(10),

@@ -13,11 +13,26 @@ import {
   asService,
   asUser,
   completeProfile,
+  expectError,
   freshDb,
   one,
   scalar,
   signUp,
 } from '../lib/harness.mjs'
+
+/** Anonymous role, exactly as PostgREST presents a logged-out visitor. */
+async function asAnon(db, fn) {
+  await db.exec(`SELECT set_config('request.jwt.claim.sub', '', false);
+                 SELECT set_config('request.jwt.claim.role', 'anon', false);
+                 SET ROLE anon;`)
+  try {
+    return await fn()
+  } finally {
+    try {
+      await db.exec(`RESET ROLE; SELECT set_config('request.jwt.claim.role', '', false)`)
+    } catch { /* aborted transaction */ }
+  }
+}
 
 async function countEvents(db, userId, event) {
   return scalar(
@@ -350,8 +365,15 @@ export default async function activitySuite(db) {
   // Mark alice as admin.
   await db.query(`UPDATE public.profiles SET is_admin = TRUE WHERE id = $1`, [alice])
 
-  const analytics = await asUser(db, alice, () =>
-    scalar(db, `SELECT public.admin_analytics(14) AS a`)
+  // The admin panel calls this RPC with the SERVICE-ROLE client, which carries
+  // no user JWT: authorization is admin_assert_actor(p_admin_id) — the same
+  // single authoritative admin check every other admin RPC uses. (Before
+  // migration 20260921000000 the gate was is_admin(), which reads auth.uid();
+  // a service-role call has no uid, so the RPC rejected the very admin the
+  // panel had already authorised — the reported
+  // "Could not load analytics: admin_analytics: admin only.")
+  const analytics = await asService(db, () =>
+    scalar(db, `SELECT public.admin_analytics(14, $1) AS a`, [alice])
   )
   t.check('admin_analytics returns payload', analytics != null, analytics)
   const parsed = typeof analytics === 'string' ? JSON.parse(analytics) : analytics
@@ -364,29 +386,124 @@ export default async function activitySuite(db) {
   // No fake data — counts of not-yet-existent items are 0.
   t.equal('payments_refunded = 0 (none)', parsed.kpis.payments_refunded, 0)
 
-  // Non-admin cannot call admin_analytics().
-  const errNonAdmin = await (async () => {
+  // The day axis must END ON TODAY (IST). It used to be built from a
+  // timestamptz, so to_char() re-rendered the labels in the session timezone
+  // (UTC) and the current IST day fell off the axis — today's signups,
+  // revenue, interests, messages, searches and profile views vanished from
+  // every chart even though the data existed.
+  const istToday = await scalar(
+    db,
+    `SELECT to_char(date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata'), 'YYYY-MM-DD') AS d`
+  )
+  t.equal('day axis ends on the current IST day', parsed.daily.days.at(-1), istToday)
+  t.equal('today\u2019s signup bucket counts the real signups', parsed.daily.signups.at(-1), 5)
+
+  // A signed-in admin may also call it (auth.uid() must equal p_admin_id).
+  const errOtherAdminClaim = await (async () => {
     try {
-      await asUser(db, bob, () => scalar(db, `SELECT public.admin_analytics(14) AS a`))
+      await asUser(db, alice, () => scalar(db, `SELECT public.admin_analytics(14, $1) AS a`, [alice]))
       return ''
     } catch (e) {
       return e.message ?? String(e)
     }
   })()
-  t.check('non-admin blocked', /admin only/i.test(errNonAdmin), errNonAdmin)
+  t.check(
+    'EXECUTE is service_role only (the body still gates, defence in depth)',
+    /permission denied/i.test(errOtherAdminClaim),
+    errOtherAdminClaim
+  )
+
+  // Non-admin cannot call admin_analytics(): a plain member has no EXECUTE
+  // privilege at all, and the service-role control plane cannot name a
+  // non-admin as the acting admin.
+  const errNonAdmin = await (async () => {
+    try {
+      await asUser(db, bob, () => scalar(db, `SELECT public.admin_analytics(14, $1) AS a`, [alice]))
+      return ''
+    } catch (e) {
+      return e.message ?? String(e)
+    }
+  })()
+  t.check('non-admin member blocked', /permission denied/i.test(errNonAdmin), errNonAdmin)
+
+  const errNonAdminId = await (async () => {
+    try {
+      await asService(db, () => scalar(db, `SELECT public.admin_analytics(14, $1) AS a`, [bob]))
+      return ''
+    } catch (e) {
+      return e.message ?? String(e)
+    }
+  })()
+  t.check('service role cannot name a non-admin actor', /ADMIN_ONLY/i.test(errNonAdminId), errNonAdminId)
+
+  const errNoActor = await (async () => {
+    try {
+      await asService(db, () => scalar(db, `SELECT public.admin_analytics(14) AS a`))
+      return ''
+    } catch (e) {
+      return e.message ?? String(e)
+    }
+  })()
+  t.check('service role cannot read analytics anonymously', /ADMIN_ONLY/i.test(errNoActor), errNoActor)
+
+  const errAnon = await asAnon(db, () =>
+    expectError(() => db.query(`SELECT public.admin_analytics(14, $1)`, [alice]))
+  )
+  t.check('anonymous caller blocked', /permission denied/i.test(errAnon), errAnon)
+
+  // One definition only: no leftover integer-only overload.
+  const analyticsOverloads = (
+    await db.query(
+      `SELECT pg_get_function_identity_arguments(p.oid) AS args
+       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = 'admin_analytics'`
+    )
+  ).rows.map((r) => r.args)
+  t.equal('exactly one admin_analytics definition', analyticsOverloads, ['p_days integer, p_admin_id uuid'])
 
   // =========================================================================
   // 13. Date range filtering works
   // =========================================================================
   console.log(' [13] date-range filtering')
-  const a7 = await asUser(db, alice, () => scalar(db, `SELECT public.admin_analytics(7) AS a`))
-  const p7 = typeof a7 === 'string' ? JSON.parse(a7) : a7
+  const readRange = (days) =>
+    asService(db, () => scalar(db, `SELECT public.admin_analytics($1, $2) AS a`, [days, alice]))
+  const norm = (v) => (typeof v === 'string' ? JSON.parse(v) : v)
+
+  const p7 = norm(await readRange(7))
   t.equal('window_days reflects request (7)', p7.window_days, 7)
   t.equal('daily.days length matches window (7)', p7.daily.days.length, 7)
-  const a30 = await asUser(db, alice, () => scalar(db, `SELECT public.admin_analytics(30) AS a`))
-  const p30 = typeof a30 === 'string' ? JSON.parse(a30) : a30
+  t.equal('7-day axis ends today (IST)', p7.daily.days.at(-1), istToday)
+  const p14 = norm(await readRange(14))
+  t.equal('window_days reflects request (14)', p14.window_days, 14)
+  t.equal('daily.days length matches window (14)', p14.daily.days.length, 14)
+  const p30 = norm(await readRange(30))
   t.equal('window_days reflects request (30)', p30.window_days, 30)
   t.equal('daily.days length matches window (30)', p30.daily.days.length, 30)
+  t.equal('30-day axis ends today (IST)', p30.daily.days.at(-1), istToday)
+  const p90 = norm(await readRange(90))
+  t.equal('window_days reflects request (90)', p90.window_days, 90)
+  t.equal('daily.days length matches window (90)', p90.daily.days.length, 90)
+  t.equal('90-day axis ends today (IST)', p90.daily.days.at(-1), istToday)
+  // The window really reaches the query: a 90-day axis strictly contains the
+  // 7-day one and every bucket array is the same length as the axis.
+  t.check(
+    'the window changes the server-side query (90d ⊃ 7d)',
+    p90.daily.days.slice(-7).every((d, i) => d === p7.daily.days[i]) &&
+      p90.daily.days.length > p7.daily.days.length,
+    { d7: p7.daily.days, d90tail: p90.daily.days.slice(-7) }
+  )
+  for (const [name, payload] of [['7', p7], ['14', p14], ['30', p30], ['90', p90]]) {
+    for (const series of ['signups', 'revenue', 'interests', 'messages', 'searches', 'profile_views']) {
+      t.equal(
+        `${name}-day ${series} bucket length matches the axis`,
+        payload.daily[series].length,
+        payload.daily.days.length
+      )
+    }
+  }
+  // Out-of-range input is clamped server-side, never trusted.
+  t.equal('p_days = 0 is clamped to 1', norm(await readRange(0)).window_days, 1)
+  t.equal('p_days = 9999 is clamped to 365', norm(await readRange(9999)).window_days, 365)
 
   // =========================================================================
   // 14. Analytics counts come from authoritative sources (no double counting)
