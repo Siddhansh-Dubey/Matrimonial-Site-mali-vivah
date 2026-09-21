@@ -14,10 +14,9 @@ const QUICK_LINKS = [
 ]
 
 const IMPORTANT_LINKS = [
-  { href: '/terms', key: 'footer.terms' },
-  { href: '/privacy', key: 'footer.privacy' },
+  { href: '/terms-and-conditions', key: 'footer.terms' },
+  { href: '/privacy-policy', key: 'footer.privacy' },
   { href: '/cancellation-and-refund', key: 'footer.cancellation' },
-  { href: '/rules', key: 'footer.rules' },
 ]
 
 function GoldEmblem({ className = '' }: { className?: string }) {

@@ -15,8 +15,11 @@ const nextConfig = {
     return [
       { source: '/refund', destination: '/cancellation-and-refund', permanent: true },
       { source: '/refund-policy', destination: '/cancellation-and-refund', permanent: true },
-      { source: '/terms-of-service', destination: '/terms', permanent: true },
-      { source: '/privacy-policy', destination: '/privacy', permanent: true },
+      // Canonical legal routes are /privacy-policy and /terms-and-conditions;
+      // the old page locations redirect so existing links never break.
+      { source: '/terms', destination: '/terms-and-conditions', permanent: true },
+      { source: '/terms-of-service', destination: '/terms-and-conditions', permanent: true },
+      { source: '/privacy', destination: '/privacy-policy', permanent: true },
     ]
   },
 }
