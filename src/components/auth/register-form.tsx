@@ -464,6 +464,29 @@ export function RegisterForm() {
               </div>
 
               <div>
+                <p className="mb-2 text-xs leading-relaxed text-stone-500">
+                  {t('register.terms.notice.before')}{' '}
+                  <Link
+                    href="/terms-and-conditions"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-stone-700 underline underline-offset-2 hover:text-brand-700"
+                  >
+                    {t('register.terms.notice.terms')}
+                    <span className="sr-only">{t('register.terms.newTab')}</span>
+                  </Link>{' '}
+                  {t('register.terms.notice.and')}{' '}
+                  <Link
+                    href="/privacy-policy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-stone-700 underline underline-offset-2 hover:text-brand-700"
+                  >
+                    {t('register.terms.notice.privacy')}
+                    <span className="sr-only">{t('register.terms.newTab')}</span>
+                  </Link>
+                  {t('register.terms.notice.after')}
+                </p>
                 <label className="flex cursor-pointer items-start gap-2.5 text-sm text-stone-600">
                   <input
                     type="checkbox"
@@ -474,7 +497,27 @@ export function RegisterForm() {
                     className="mt-0.5 h-4 w-4 shrink-0 rounded border-stone-300 text-brand-600 focus:ring-brand-500"
                   />
                   <span>
-                    {t('register.terms')}
+                    {t('register.terms.before')}{' '}
+                    <Link
+                      href="/terms-and-conditions"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-brand-700 underline underline-offset-2 hover:text-brand-800"
+                    >
+                      {t('register.terms.link-terms')}
+                      <span className="sr-only">{t('register.terms.newTab')}</span>
+                    </Link>{' '}
+                    {t('register.terms.between')}{' '}
+                    <Link
+                      href="/privacy-policy"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold text-brand-700 underline underline-offset-2 hover:text-brand-800"
+                    >
+                      {t('register.terms.link-privacy')}
+                      <span className="sr-only">{t('register.terms.newTab')}</span>
+                    </Link>
+                    {t('register.terms.after')}
                   </span>
                 </label>
                 {fieldErrors.terms && (
